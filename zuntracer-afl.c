@@ -450,7 +450,6 @@ static void setup_args(int argc, char ** argv){
 void setup_oracle(u8 * path_to_oracle){
 
   /* If not user-supplied, let Zipr instrument the binary. */
-
   if (oracle_zipr_dir == NULL){
     char * tmp1 = alloc_printf("%s/.zipr.oracle", out_dir);
     char * zipr_args[] = {"zafl.sh", target_path, oracle_path, "-f", "-t", tmp1, NULL};
@@ -458,7 +457,6 @@ void setup_oracle(u8 * path_to_oracle){
   }
 
   /* Otherwise, copy it over from the user-supplied Zipr dir. */
-  
   else{
     char * tmp2 = alloc_printf("%s/c.out", oracle_zipr_dir);
     copy_binary(tmp2, oracle_path);
@@ -470,7 +468,6 @@ void setup_oracle(u8 * path_to_oracle){
 void setup_tracer(){
 
   /* If not user-supplied, let Zipr instrument the binary. */
-
   if (tracer_zipr_dir == NULL){
     char * tmp1 = alloc_printf("%s/.zipr.tracer", out_dir);
     char * zipr_args[] = {"zafl.sh", target_path, tracer_path, "-u", "-t", tmp1, NULL};
@@ -478,7 +475,6 @@ void setup_tracer(){
   }
 
   /* Otherwise, copy it over from the user-supplied Zipr dir. */
-
   else{
     char * tmp2 = alloc_printf("%s/c.out", tracer_zipr_dir);
     copy_binary(tmp2, tracer_path);
@@ -493,8 +489,8 @@ void setup_block_array(){
   /* Run our helper script to generate the correct addr-block mapping. */
 
   bb_lst_path = alloc_printf("%s/.bblist", out_dir);  
-  char * zipr_map_path = alloc_printf("%s/.zipr.oracle/zipr.map", out_dir);
-  char * zax_map_path  = alloc_printf("%s/.zipr.tracer/zax.map", out_dir);
+  char * zipr_map_path = alloc_printf("%s/zipr.map", oracle_zipr_dir);
+  char * zax_map_path  = alloc_printf("%s/zax.map", tracer_zipr_dir);
   char * map_log_path  = alloc_printf("%s/.bblst.log", out_dir);
   char * map_args[] = {"build-map.py", zipr_map_path, zax_map_path, bb_lst_path, map_log_path, NULL};
   execute(map_args, "build-map.py", 1);  

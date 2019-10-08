@@ -3897,7 +3897,7 @@ static void show_stats(void) {
   banner_pad = (70 - banner_len) / 2;
   memset(tmp, ' ', banner_pad);
 
-  sprintf(tmp + banner_pad, "%s " cLCY "| based on AFL-" VERSION " |" cLGN " (%s)",  cLBL "UnTracer-AFL", use_banner);
+  sprintf(tmp + banner_pad, "%s " cLCY "| based on AFL-" VERSION " |" cLGN " (%s)",  cLBL "ZUnTracer-AFL", use_banner);
 
   SAYF("\n%s\n\n", tmp);
 
@@ -6888,9 +6888,14 @@ static void usage(u8* argv0) {
        "  -i dir        - input directory with test cases\n"
        "  -o dir        - output directory for fuzzer findings\n\n"
 
+       "If using pre-instrumented oracle/tracer (recommended):\n\n"
+       
+       "  -O dir        - zipr working dir for oracle\n"
+       "  -T dir        - zipr working dir for tracer\n\n"
+
        "Execution control settings:\n\n"
 
-       "  -t msec       - timeout for each run (auto-scaled, 50-%u ms)\n"
+       "  -t msec       - timeout for each run (auto-scaled, 50-%u ms)\n\n"
  
        "Fuzzing behavior settings:\n\n"
 
@@ -6899,7 +6904,7 @@ static void usage(u8* argv0) {
 
        "Other stuff:\n\n"
 
-       "  -M / -S id    - distributed mode (see parallel_fuzzing.txt)\n"
+       "  -M / -S id    - distributed mode (see parallel_fuzzing.txt)\n\n"
  
        "For additional tips, please consult %s/README.\n\n",
 

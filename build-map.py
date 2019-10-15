@@ -76,12 +76,10 @@ def main():
 
 	bbidMap = load_bbid_map()
 	addrMap = load_addr_map()
-	cedgLst = load_cedg_lst()
+	#cedgLst = load_cedg_lst()
 
 	# Attempt to match all cedge insn's to bbid's
 	#for insn in cedgLst:
-	#	print (insn)
-
 	#	if insn in [x[1] for x in bbidMap]:
 	#		print (insn)
 

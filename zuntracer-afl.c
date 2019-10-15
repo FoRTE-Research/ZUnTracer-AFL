@@ -508,10 +508,8 @@ void setup_tracer(){
 void setup_block_array(){
 
   bb_lst_path = alloc_printf("%s/.bblist", out_dir);  
-  char * zipr_map_path = alloc_printf("%s/zipr.map", oracle_zipr_dir);
-  char * zax_map_path  = alloc_printf("%s/zax.map", tracer_zipr_dir);
   char * map_log_path  = alloc_printf("%s/.bblst.log", out_dir);
-  char * map_args[] = {"build-map.py", zipr_map_path, zax_map_path, bb_lst_path, map_log_path, NULL};
+  char * map_args[] = {"build-map.py", oracle_zipr_dir, tracer_zipr_dir, bb_lst_path, map_log_path, NULL};
   execute(map_args, "build-map.py", 1);  
 
   /* Reads a list of basic blocks from file and populates a new array. */

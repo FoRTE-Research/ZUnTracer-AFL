@@ -45,7 +45,7 @@ def load_bbid_map():
 
 		for line in lines:
 			line = line.split()
-			bbid = int(line[0], 10) # base-10
+			bbid = int(line[0], 16) 
 			insn = int(line[1].split(':')[0], 16) 
 			bbidMap.append((bbid, insn))
 
@@ -55,17 +55,18 @@ def load_bbid_map():
 def load_cedg_lst():
 	cedgLst = []
 
-	with open("%s/ceb.map" % oracleZiprDir) as oracleCeb:
-		lines = oracleCeb.readlines()[1:]
+	with open("%s/ceb.map" % tracerZiprDir) as tracerCeb:
+		lines = tracerCeb.readlines()[1:]
 
 		for line in lines:
 			line = line.split()
-			insn   = int(line[0], 16) # base-16
-			broken = line[1]
-			etype  = line[2]
+			insnOld   = int(line[0], 16) 
+			insnNew   = int(line[3], 16)
+			broken 	  = line[1]
+			etype     = line[2]
 
-			if (broken == 'false') and (etype == 'target'):
-				cedgLst.append(insn)
+			if (etype == 'targ'):
+				cedgLst.append((insnOld, insnNew))
 
 	return cedgLst
 
@@ -78,24 +79,39 @@ def main():
 	addrMap = load_addr_map()
 	#cedgLst = load_cedg_lst()
 
-	# Attempt to match all cedge insn's to bbid's
-	#for insn in cedgLst:
-	#	if insn in [x[1] for x in bbidMap]:
-	#		print (insn)
+	'''
+	# Attempt to match all cedge insn's to bbid's and addresses
+	for pair in cedgLst:
+		insnOld = pair[0]
+		insnNew = pair[1]
+
+		# Build (insnOld, bbid) map by matching insnNew to the block starting with it
+		matches = [i for i, bbidPair in enumerate(bbidMap) if bbidPair[1] == insnNew]
+		if len(matches) == 1:
+			indx = matches[0]
+			bbid = bbidMap[indx][0]
+			print (insnOld, bbid)
+
+		# Build (addrNew, bbid) map
+		# 
+
+
+	exit(0)
+	'''
 
 	# Attempt to find match for (bbid,insn) to (addr,insn) pairs
 	for pair in bbidMap:
 		bbid = pair[0]
 		insn = pair[1]
 
-		matches = [i for i, addr in enumerate(addrMap) if addr[1] == insn]
+		matches = [i for i, addrPair in enumerate(addrMap) if addrPair[1] == insn]
 
 		# If found match write out the (addr,bbid) tuple
 		if len(matches) == 1:
 			indx = matches[0]
 			addr = addrMap[indx][0]
 			addr = int(addr, 16) - int(offset,16)
-			outMap.write("%i,%i\n" % (addr, bbid))
+			outMap.write("%i,%i,CC\n" % (addr, bbid))
 			mapLog.write("Found mapping for insn: %s\n" % hex(insn))
 
 		# Multiple matches would indicate something wrong on the zipr-side

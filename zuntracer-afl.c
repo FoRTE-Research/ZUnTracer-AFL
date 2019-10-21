@@ -545,6 +545,9 @@ void setup_block_maps(){
     bb_map_addr[bbid] = addr;
     bb_map_modl[bbid] = mod_len;
 
+    if (bb_map_addr == 0)
+      continue;
+
     /* Update block modification bytes map. */
 
     if ((bb_map_modb[bbid] = malloc(sizeof(char) * 50)) == NULL) {
@@ -553,6 +556,8 @@ void setup_block_maps(){
     }
     strcpy(bb_map_modb[bbid], mod_bytes);
     blocks_total++;
+
+    //printf("%d, %d, %d, %s\n", blocks_total, bbid, addr, mod_bytes);
 
     if (blocks_total > MAP_SIZE){
       SAYF("\n" cLRD "[-] " cRST
@@ -594,14 +599,20 @@ void modify_oracle(u8 * path_to_oracle){
 
   /* 0th map entry is always null, as is anything past total blocks. */
 
-  for (int i=1; i<blocks_total+1; i++){ 
+  for (int i=1; i<MAP_SIZE; i++){ 
 
     /* Obtain mapped address, modification length and bytes. */
 
+    if (!bb_map_addr[i])
+      continue;
+
     addr = bb_map_addr[i];
     char mod_bytes[50];
+
     strcpy(mod_bytes, bb_map_modb[i]);
     free(bb_map_modb[i]);
+
+    printf ("%i, %d, %s\n", i, addr, mod_bytes);
 
     if (addr != 0){
 
@@ -657,11 +668,11 @@ int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){
 
   /* Iterate through basic blocks and "reset" its specified number of bytes. */
 
-  for (int i=1; i<blocks_total+1; i++){  
+  for (int i=1; i<MAP_SIZE; i++){  
 
     /* If this block wasn't traced or we've reset it before, go to next one. */
 
-    if (!trace_bits[i] || blocks_cov[i])
+    if (!trace_bits[i] || blocks_cov[i] || !bb_map_addr[i])
       continue;
 
     /* Pull mapped block addresses and modification byte length. */

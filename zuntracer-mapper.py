@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import sys
+from capstone import *
 
 usage = "\n\tUsage: " \
 		"\tzuntracer-mapper.py [/path/to/oracle/zipr/dir] [/path/to/tracer/zipr/dir] [/path/to/outmap], [/path/to/maplog]\n"
@@ -15,33 +16,29 @@ outMapPath 	  = sys.argv[3]
 outLogPath 	  = sys.argv[4]
 offset        = "0x400000"
 
+addrMap = []
+bbidMap = []
+oracleCedgeLst = []
+tracerCedgeLst = []
 
-# Loads zipr.map : maps instructions to addresses
+# Stores mapping of instruction ID's to oracle instruction addresses
+
 def load_addr_map():
-	addrMap = []
-
 	with open ("%s/zipr.map" % oracleZiprDir) as oracleZipr:
 		lines = oracleZipr.readlines()[1:]
 		
 		for line in lines:
 			line = line.split()
-
-			# Merge disas all into one col (unused as of now)
-			line[5] = " ".join(line[5:])	
-			line = line[:6]
-			
-			# Store pairing of instruction ID, new address
-			insn = int(line[0], 16) # base-16
+			insn = int(line[0], 16) 
 			addr = line[3] 
-			addrMap.append((addr, insn))	
+			addrMap.append((insn, addr))	
 
-	return addrMap
+	return
 
 
-# Loads zax.map : maps basic blocks to instructions
+# Stores mapping of instruction ID's to tracer bitmap ID's
+
 def load_bbid_map():
-	bbidMap = []
-
 	with open("%s/zax.map" % tracerZiprDir) as tracerZax:
 		lines = tracerZax.readlines()[1:]
 
@@ -49,92 +46,154 @@ def load_bbid_map():
 			line = line.split()
 			bbid = int(line[0], 16) 
 			insn = int(line[1].split(':')[0], 16) 
-			bbidMap.append((bbid, insn))
-
-	return bbidMap
-
-
-# Loads ceb.map : maps critical edges to their insns, types
-def load_cedg_lst():
-	cedgLst = []
-
-	with open("%s/ceb.map" % tracerZiprDir) as tracerCeb:
-		lines = tracerCeb.readlines()[1:]
-
-		for line in lines:
-			line = line.split()
-			insnOld   = int(line[0], 16) 
-			insnNew   = int(line[3], 16)
-			broken 	  = line[1]
-			etype     = line[2]
-
-			if (etype == 'targ'):
-				cedgLst.append((insnOld, insnNew))
-
-	return cedgLst
-
-	'''
-	# Attempt to match all cedge insn's to bbid's and addresses
-	for pair in cedgLst:
-		insnOld = pair[0]
-		insnNew = pair[1]
-
-		# Build (insnOld, bbid) map by matching insnNew to the block starting with it
-		matches = [i for i, bbidPair in enumerate(bbidMap) if bbidPair[1] == insnNew]
-		if len(matches) == 1:
-			indx = matches[0]
-			bbid = bbidMap[indx][0]
-			print (insnOld, bbid)
-
-		# Build (addrNew, bbid) map
-		# 
-
-
-	exit(0)
-	'''
-
-# Attempt to find match for (bbid,insn) to (addr,insn) pairs
-def map_regular_blocks(bbidMap, addrMap, outMapFile, outLogFile):
-	for pair in bbidMap:
-		bbid = pair[0]
-		insn = pair[1]
-
-		matches = [i for i, addrPair in enumerate(addrMap) if addrPair[1] == insn]
-
-		# If found match write out the (addr,bbid) tuple
-		if len(matches) == 1:
-			indx = matches[0]
-			addr = addrMap[indx][0]
-			addr = int(addr, 16) - int(offset,16)
-			outMapFile.write("%i, %i, %i, 1, 0xCC\n" % (bbid, addr, addr))
-			outLogFile.write("Found mapping for insn: %s\n" % hex(insn))
-
-		# Multiple matches would indicate something wrong on the zipr-side
-		elif len(matches) > 1:
-			outLogFile.write("Multiple mappings found for insn: %s\n" % hex(insn))
-
-		# Log unmapped insns
-		else:
-			outLogFile.write("Cannot find mapping for insn: %s\n" % hex(insn))	
+			bbidMap.append((insn, bbid))
 
 	return
+
+
+# Loads both oracle and tracer critical edge maps
+
+def load_cedge_lsts():
+	oracleCebFile = open("%s/ceb.map" % oracleZiprDir, "r")
+	tracerCebFile = open("%s/ceb.map" % tracerZiprDir, "r")
 	
+	for line in oracleCebFile.readlines()[1:]:
+		line = line.split()
+		insnSrc = int(line[0], 16)
+		broken 	= line[1]
+		etype 	= line[2]
+		insnDst = int(line[3], 16)
+		oracleCedgeLst.append((insnSrc, broken, etype, insnDst))
+
+	for line in tracerCebFile.readlines()[1:]:
+		line = line.split()
+		insnSrc = int(line[0], 16)
+		broken 	= line[1]
+		etype 	= line[2]
+		insnDst = int(line[3], 16)
+		tracerCedgeLst.append((insnSrc, broken, etype, insnDst))
+
+	oracleCebFile.close()
+	tracerCebFile.close()
+	
+	return
+
+
+# Helper function to return disassembled bytes
+
+def get_disasm_bytes(dump, addr):
+	md = Cs(CS_ARCH_X86, CS_MODE_64)
+	md.syntax = CS_OPT_SYNTAX_ATT
+	md.detail = True
+	return list(md.disasm(dump, int(addr, 16)))[0]
+
+
+# Retrieves the matching trace bitmap ID given an instruction ID
+
+def get_tracer_bbid_from_insn(insn, log):
+	matches = [i for i, pair in enumerate(bbidMap) if pair[0] == insn]
+
+	if len(matches) == 0:
+		log.write("ERROR: no bbid matches found for insn %s" % insn)
+		return -1
+
+	if len(matches) > 1:
+		log.write("ERROR: multiple bbid matches found for insn %s" % insn)
+		return -1
+
+	bbid = bbidMap[matches[0]][1]
+	log.write("Found bbid match for insn %s" % insn)
+
+	return bbid
+
+
+# Retrieves the matching trace bitmap ID given an instruction ID
+
+def get_oracle_addr_from_insn(insn, log):
+	matches = [i for i, pair in enumerate(addrMap) if pair[0] == insn]
+
+	if len(matches) == 0:
+		log.write("ERROR: no addr matches found for insn %s" % insn)
+		return -1
+
+	if len(matches) > 1:
+		log.write("ERROR: multiple addr matches found for insn %s" % insn)
+		return -1
+
+	addr = addrMap[matches[0]][1]
+	log.write("Found addr match for insn %s" % insn)
+
+	return addr
+
+
+# Attempt to find match for (bbid,insn) to (addr,insn) pairs
+
+def map_regular_blocks(outMapFile, outLogFile):
+	for block in bbidMap:
+		insn = block[0]
+		bbid = block[1]
+		addr = get_oracle_addr_from_insn(insn, outLogFile)
+		
+		if addr != -1:
+			addr = int(addr, 16) - int(offset, 16)
+			outMapFile.write("%i, %i, %i, 1, 0xCC\n" % (bbid, addr, addr))	
+
+	return
+
+
+def get_tracer_bbid_from_cedge(insnSrc, broken, etype, log):
+	matches = [i for i, cedg in enumerate(tracerCedgeLst) 
+		if  cedg[0] == insnSrc and
+			#cedg[1] == broken and
+			cedg[2] == etype]
+
+	if len(matches) == 0:
+		log.write("ERROR: no cedge matches found for cedge (%s,%s,%s)" % (insnSrc, broken, etype))
+		return -1
+
+	if len(matches) > 1:
+		log.write("ERROR: multiple cedge matches found for cedge (%s,%s,%s)" % (insnSrc, broken, etype))
+		return -1
+
+	insnDst = tracerCedgeLst[matches[0]][3]
+	bbid = get_tracer_bbid_from_insn(insnDst, log)
+
+	return bbid
+
+
+def map_cedge_fallthru(outMapFile, outLogFile):
+	for cedge in oracleCedgeLst:
+		insnSrc = cedge[0]
+		broken 	= cedge[1]
+		etype 	= cedge[2]
+		insnDst = cedge[3]
+
+		if (broken == "true"):
+
+			bbid = get_tracer_bbid_from_cedge(insnSrc, broken, etype, outLogFile)
+			addr = get_oracle_addr_from_insn(insnDst, outLogFile)
+
+			if (bbid != -1):
+				addr = int(addr, 16) - int(offset, 16)
+				outMapFile.write("%i, %i, %i, 1, 0xCC\n" % (bbid, addr, addr))
+
+	return
 
 def main():
 	outMapFile = open(outMapPath, "w+")
 	outLogFile = open(outLogPath, "w+")
 
-	bbidMap = load_bbid_map()
-	addrMap = load_addr_map()
-	#cedgLst = load_cedg_lst()
-
 	outMapFile.write("# BLOCK_ID, INSN_ADDR, ADJST_ADDR, MOD_LEN, MOD_BYTES\n")
 
-	map_regular_blocks(bbidMap, addrMap, outMapFile, outLogFile)
+	load_addr_map()
+	load_bbid_map()
+	load_cedge_lsts()
+
+	map_regular_blocks(outMapFile, outLogFile)
+	map_cedge_fallthru(outMapFile, outLogFile)
 
 	outMapFile.close()
 	outLogFile.close()
-
 
 if __name__ == "__main__":
 	main()

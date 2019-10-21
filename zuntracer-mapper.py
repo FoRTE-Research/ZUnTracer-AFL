@@ -3,7 +3,7 @@
 import sys
 
 usage = "\n\tUsage: " \
-		"\tbuild-map.py [/path/to/oracle/zipr/dir] [/path/to/tracer/zipr/dir] [/path/to/outmap], [/path/to/maplog]\n"
+		"\tzuntracer-mapper.py [/path/to/oracle/zipr/dir] [/path/to/tracer/zipr/dir] [/path/to/outmap], [/path/to/maplog]\n"
 
 if len(sys.argv) < 5:
 	print ("Missing argument(s)!")
@@ -11,11 +11,12 @@ if len(sys.argv) < 5:
 
 oracleZiprDir = sys.argv[1]
 tracerZiprDir = sys.argv[2]
-outMapPath    = sys.argv[3]
-mapLogPath	  = sys.argv[4]
+outMapPath 	  = sys.argv[3]
+outLogPath 	  = sys.argv[4]
 offset        = "0x400000"
 
-# Zipr.map : maps instructions to addresses
+
+# Loads zipr.map : maps instructions to addresses
 def load_addr_map():
 	addrMap = []
 
@@ -36,7 +37,8 @@ def load_addr_map():
 
 	return addrMap
 
-# Zax.map : maps basic blocks to instructions
+
+# Loads zax.map : maps basic blocks to instructions
 def load_bbid_map():
 	bbidMap = []
 
@@ -51,7 +53,8 @@ def load_bbid_map():
 
 	return bbidMap
 
-# Ceb.map : maps critical edges to their insns, types
+
+# Loads ceb.map : maps critical edges to their insns, types
 def load_cedg_lst():
 	cedgLst = []
 
@@ -69,15 +72,6 @@ def load_cedg_lst():
 				cedgLst.append((insnOld, insnNew))
 
 	return cedgLst
-
-
-def main():
-	outMap = open(outMapPath, "w+")
-	mapLog = open(mapLogPath, "w+")
-
-	bbidMap = load_bbid_map()
-	addrMap = load_addr_map()
-	#cedgLst = load_cedg_lst()
 
 	'''
 	# Attempt to match all cedge insn's to bbid's and addresses
@@ -99,7 +93,8 @@ def main():
 	exit(0)
 	'''
 
-	# Attempt to find match for (bbid,insn) to (addr,insn) pairs
+# Attempt to find match for (bbid,insn) to (addr,insn) pairs
+def map_regular_blocks(bbidMap, addrMap, outMapFile, outLogFile):
 	for pair in bbidMap:
 		bbid = pair[0]
 		insn = pair[1]
@@ -111,19 +106,34 @@ def main():
 			indx = matches[0]
 			addr = addrMap[indx][0]
 			addr = int(addr, 16) - int(offset,16)
-			outMap.write("%i,%i,CC\n" % (addr, bbid))
-			mapLog.write("Found mapping for insn: %s\n" % hex(insn))
+			outMapFile.write("%i, %i, %i, 1, 0xCC\n" % (bbid, addr, addr))
+			outLogFile.write("Found mapping for insn: %s\n" % hex(insn))
 
 		# Multiple matches would indicate something wrong on the zipr-side
 		elif len(matches) > 1:
-			mapLog.write("Multiple mappings found for insn: %s\n" % hex(insn))
+			outLogFile.write("Multiple mappings found for insn: %s\n" % hex(insn))
 
 		# Log unmapped insns
 		else:
-			mapLog.write("Cannot find mapping for insn: %s\n" % hex(insn))
+			outLogFile.write("Cannot find mapping for insn: %s\n" % hex(insn))	
 
-	outMap.close()
-	mapLog.close()
+	return
+	
+
+def main():
+	outMapFile = open(outMapPath, "w+")
+	outLogFile = open(outLogPath, "w+")
+
+	bbidMap = load_bbid_map()
+	addrMap = load_addr_map()
+	#cedgLst = load_cedg_lst()
+
+	outMapFile.write("# BLOCK_ID, INSN_ADDR, ADJST_ADDR, MOD_LEN, MOD_BYTES\n")
+
+	map_regular_blocks(bbidMap, addrMap, outMapFile, outLogFile)
+
+	outMapFile.close()
+	outLogFile.close()
 
 
 if __name__ == "__main__":

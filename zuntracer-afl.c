@@ -88,7 +88,12 @@ char ** oracle_argv;
 char ** tracer_argv;                
 
 int oracle_cov[MAP_SIZE];             /* Arrays of covered block ID's     */
-int block_array[MAP_SIZE];            /* Array of all basic blocks        */
+int bb_map_addr[MAP_SIZE];            /* Array of all basic blocks        */
+int bb_map_modl[MAP_SIZE];          
+//char *bb_map_modb[MAP_SIZE];
+//char ** bb_map_modb;// = malloc(sizeof(char*) * MAP_SIZE);
+//char bb_map_modb[MAP_SIZE][50];
+char * bb_map_modb[MAP_SIZE];
 
 EXP_ST u64 blocks_total = 0,          /* Number total basic blocks        */
            blocks_seen = 0,           /* Number of visited basic blocks   */
@@ -109,7 +114,7 @@ EXP_ST s32 oracle_fsrv_ctl_fd,        /* Forkserver control pipes         */
 EXP_ST u8 *target_path,               /* Path to target binary            */
           *oracle_path,               /* Path to oracle binary            */    
           *tracer_path,               /* Path to tracer binary            */
-          *bb_lst_path,               /* Path to basic block list         */ 
+          *bb_map_path,               /* Path to basic block list         */ 
           *oracle_zipr_dir,           /* Oracle zipr directory            */
           *tracer_zipr_dir;           /* Tracer zipr directory            */
 
@@ -464,8 +469,8 @@ void setup_oracle(){
   /* If not user-supplied, let Zipr instrument the binary. */
 
   if (oracle_zipr_dir == NULL){
-    char * tmp1 = alloc_printf("%s/.zipr.oracle", out_dir);
-    char * zipr_args[] = {"zafl.sh", target_path, oracle_path, "-f", "-t", tmp1, NULL};
+    oracle_zipr_dir = alloc_printf("%s/.zipr.oracle", out_dir);
+    char * zipr_args[] = {"zafl.sh", target_path, oracle_path, "-f", "-t", oracle_zipr_dir, NULL};
     execute(zipr_args, "zafl.sh", 1);
   }
 
@@ -487,8 +492,8 @@ void setup_tracer(){
   /* If not user-supplied, let Zipr instrument the binary. */
 
   if (tracer_zipr_dir == NULL){
-    char * tmp1 = alloc_printf("%s/.zipr.tracer", out_dir);
-    char * zipr_args[] = {"zafl.sh", target_path, tracer_path, "-u", "-t", tmp1, NULL};
+    tracer_zipr_dir = alloc_printf("%s/.zipr.tracer", out_dir);
+    char * zipr_args[] = {"zafl.sh", target_path, tracer_path, "-u", "-t", tracer_zipr_dir, NULL};
     execute(zipr_args, "zafl.sh", 1);
   }
 
@@ -505,48 +510,79 @@ void setup_tracer(){
 
 /* Run our helper script to generate the correct addr-block mapping. */
 
-void setup_block_array(){
+void setup_block_maps(){
 
-  bb_lst_path = alloc_printf("%s/.bblist", out_dir);  
-  char * map_log_path  = alloc_printf("%s/.bblst.log", out_dir);
-  char * map_args[] = {"build-map.py", oracle_zipr_dir, tracer_zipr_dir, bb_lst_path, map_log_path, NULL};
-  execute(map_args, "build-map.py", 1);  
+  bb_map_path = alloc_printf("%s/.bblist", out_dir);  
+  char * log_path  = alloc_printf("%s/.bblst.log", out_dir);
+  char * map_args[] = {"zuntracer-mapper.py", oracle_zipr_dir, tracer_zipr_dir, bb_map_path, log_path, NULL};
+  execute(map_args, "zuntracer-mapper.py", 1);  
 
   /* Reads a list of basic blocks from file and populates a new array. */
 
-  char tmp1[256];
-  char * tmp2;
+  FILE * bb_map_file = fopen(bb_map_path, "r");
+  if (bb_map_file == NULL){
+    perror("fopen() bb_map_path");
+    exit(EXIT_FAILURE);   
+  }
 
-  FILE * bb_lst_file = fopen(bb_lst_path, "r");
+  /* Discard header row. */
 
-  while (fgets(tmp1, sizeof(tmp1), bb_lst_file)) {
+  if (fscanf(bb_map_file, "%*[^\n]") < 0){
+    perror("fscanf() bb_map_path header");
+    exit(EXIT_FAILURE);
+  }  
 
-    strtok_r (tmp1, ", ", &tmp2);
-    
-    int addr = atoi(tmp1);
-    int id = atoi(tmp2);
+  /* Read and map block attr's, discarding those we don't care about. */
 
-    block_array[id] = addr;
+  int bbid, addr, mod_len;
+  char mod_bytes[50];
 
+  while (fscanf(bb_map_file, "%d, %*d, %d, %d, %50[0-9a-zA-Z ]", 
+                        &bbid, &addr, &mod_len, mod_bytes) == 4)
+  {
+    /* Update block address and modification length maps. */
+
+    bb_map_addr[bbid] = addr;
+    bb_map_modl[bbid] = mod_len;
+
+    /* Update block modification bytes map. */
+
+    if ((bb_map_modb[bbid] = malloc(sizeof(char) * 50)) == NULL) {
+      perror("malloc() bb_map_modb");
+      exit(EXIT_FAILURE);
+    }
+    strcpy(bb_map_modb[bbid], mod_bytes);
     blocks_total++;
-  } 
 
-  fclose(bb_lst_file);
+    if (blocks_total > MAP_SIZE){
+      SAYF("\n" cLRD "[-] " cRST
+         "Uh-oh, looks %llu blocks were processed, exceeding the current bitmap size (%u).\n"
+         "    It is necessary to increase MAP_SIZE_POW2 in the AFL config files to ensure\n"
+         "    precise coverage-guided tracing.\n",
+         blocks_total, MAP_SIZE);
+
+      FATAL("Total blocks exceeds MAP_SIZE");
+    }
+  }
+
+  fclose(bb_map_file);
 
   return;
 }
 
 
-/* Modifies the start of every basic block in the oracle binary copy. 
-   Only basic blocks recorded in the array are considered; 
-   a previous step pruned basic blocks occurring before main() to 
-   prevent forkserver failure. */
+/* Modifies the start of every basic block in the oracle binary copy based
+   on its specific attributes:
+
+    [address], [adjusted address], [modification size], [modification bytes]
+
+  The latter three categories are mapped in an array for easy indexing in
+  subsequent in-fuzzing unmodification. */
 
 void modify_oracle(u8 * path_to_oracle){
 
-  int addr;
-  char flag[1] = {0xCC};
-  int offset = 0;
+  int addr, num_bytes;
+  char delim[] = " ";
 
   /* Open both target oracle and bb list files. */
 
@@ -556,20 +592,42 @@ void modify_oracle(u8 * path_to_oracle){
     exit(EXIT_FAILURE);
   } 
 
-  for (int i=0; i<MAP_SIZE; i++){
+  /* 0th map entry is always null, as is anything past total blocks. */
 
-    addr = block_array[i] + offset;
+  for (int i=1; i<blocks_total+1; i++){ 
+
+    /* Obtain mapped address, modification length and bytes. */
+
+    addr = bb_map_addr[i];
+    char mod_bytes[50];
+    strcpy(mod_bytes, bb_map_modb[i]);
+    free(bb_map_modb[i]);
 
     if (addr != 0){
 
-      if (fseek(oracle_file, addr, SEEK_SET) != 0){
-        perror("seek() modify_oracle()");
-        exit(EXIT_FAILURE);
-      }
+      /* Read byte-by-byte from space-delimited mod hex bytes. */
+      
+      num_bytes = 0;
+      char *ptr = strtok(mod_bytes, delim);
+      
+      while(ptr != NULL)
+      {
+        /* Convert to byte for fwrite(), and write at block start. */
 
-      if (fwrite(flag, 1, 1, oracle_file) != 1){
-        perror("fwrite() modify_oracle()");
-        exit(EXIT_FAILURE);
+        char byte = (char)strtol(ptr, NULL, 16);
+
+        if (fseek(oracle_file, addr + num_bytes, SEEK_SET) != 0){
+          perror("seek() modify_oracle()");
+          exit(EXIT_FAILURE);
+        }
+
+        if (fwrite(&byte, 1, 1, oracle_file) != 1){
+          perror("fwrite() modify_oracle()");
+          exit(EXIT_FAILURE);
+        }        
+
+        ptr = strtok(NULL, delim);
+        num_bytes++; // Adjusts the current address based on mod length.
       }
     }
   }
@@ -581,15 +639,15 @@ void modify_oracle(u8 * path_to_oracle){
 
 
 /* Resets every basic block in the oracle binary copy back to its original values. 
-   To prevent redundant unmodifying of basic blocks, we remove each unmodified basic
-   block from the global hashmap, and only consider basic blocks in the hashmap. */
+   The number of bytes to reset at each basic block start are pulled from the mapping
+   generated in modify_oracle(). To prevent redundant unmodifying of basic blocks, we 
+   track unmodified basic blocks and only consider those not already seen. */
 
 int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){ 
 
-  int offset_target, offset_oracle;
-  char flag[1];
-  int offset = 0;
+  int offset_target, offset_oracle, mod_len;
   int count = 0;
+  char unmod_bytes[10];
 
   /* Open both target, target oracle, and trace files. */
 
@@ -597,28 +655,35 @@ int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){
   FILE * virgin_file = fopen(virgin_path, "r+");
   FILE * oracle_file = fopen(path_to_oracle, "r+");
 
-  /* Iterate through bb list; add the "CC" interrupt for every bb address in the target oracle. */
+  /* Iterate through basic blocks and "reset" its specified number of bytes. */
 
-  for (int i=0; i<MAP_SIZE; i++){
+  for (int i=1; i<blocks_total+1; i++){  
+
+    /* If this block wasn't traced or we've reset it before, go to next one. */
 
     if (!trace_bits[i] || blocks_cov[i])
       continue;
 
-    offset_target = block_array[i];   
-    offset_oracle = offset_target + offset;
+    /* Pull mapped block addresses and modification byte length. */
 
-    /* Jump to the respective offs in both the target and the target oracle copy. */
+    mod_len = bb_map_modl[i];
+    offset_target = bb_map_addr[i];   
+    offset_oracle = offset_target;
+
+    /* Seek to position and read/reset mod_len # of bytes. 
+       In contrast to the related operation in modify_oracle(), 
+       this doesn't read/write byte-by-byte; it treats it as a 
+       mod_len-sized chunk and does it all at once. */
 
     fseek(virgin_file, offset_target, SEEK_SET);
     fseek(oracle_file, offset_oracle, SEEK_SET);
       
-    /* Read first two bytes of basic block from the target file, overwrite in the target oracle. */
-
-    if (fread(flag, 1, 1, virgin_file) != 1){
+    if (fread(unmod_bytes, mod_len, 1, virgin_file) != 1){
       perror("fread() unmodify_oracle()");
       exit(EXIT_FAILURE);   
     }
-    if (fwrite(flag, 1, 1, oracle_file) != 1){
+
+    if (fwrite(unmod_bytes, mod_len, 1, oracle_file) != 1){
       perror("fwrite() unmodify_oracle()");
       exit(EXIT_FAILURE);
     }
@@ -8038,6 +8103,12 @@ int main(int argc, char** argv) {
 
     }
 
+  if ((oracle_zipr_dir && !tracer_zipr_dir) || (!oracle_zipr_dir && tracer_zipr_dir)) 
+    FATAL("If providing Zipr working dirs, BOTH oracle's and tracer's must be provided.");
+
+  if (!oracle_zipr_dir || !tracer_zipr_dir)
+    WARNF("No oracle/tracer Zipr dirs provided! Will run Zipr with block coverage-only config...");
+
   if (optind == argc || !in_dir || !out_dir) usage(argv[0]);
 
   setup_signal_handlers();
@@ -8111,7 +8182,7 @@ int main(int argc, char** argv) {
   setup_tracer();
 
   ACTF("Setting up basic block array...");
-  setup_block_array(); 
+  setup_block_maps(); 
 
   ACTF("Modifying oracle binary...");
   modify_oracle(oracle_path);

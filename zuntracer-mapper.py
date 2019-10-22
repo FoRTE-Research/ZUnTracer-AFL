@@ -1,8 +1,7 @@
 #!/usr/bin/python3
 
-import sys
+import os, sys
 from capstone import *
-import struct
 
 #------------------------------------------------------------
 oracleZiprDir 	= ""		 # Path to oracle zipr dir
@@ -49,6 +48,11 @@ def load_bbid_map(tracerZiprDir):
 # Stores both oracle and tracer critical edge lists.
 
 def load_cedge_lsts(oracleZiprDir, tracerZiprDir):
+
+	if (os.path.exists("%s/ceb.map" % oracleZiprDir) == False or 
+		os.path.exists("%s/ceb.map" % tracerZiprDir) == False):
+		return 
+
 	oracleCebFile = open("%s/ceb.map" % oracleZiprDir, "r")
 	tracerCebFile = open("%s/ceb.map" % tracerZiprDir, "r")
 	
@@ -129,8 +133,6 @@ def get_tracer_bbid_from_cedge(cedge, log):
 		log.write("ERROR: multiple cedge matches found for cedge (%s,%s)" % (insnSrc, etype))
 		return -1
 
-	#print (tracerCedgeLst[matches[0]])
-
 	insnDst = tracerCedgeLst[matches[0]][3]
 	bbid = get_tracer_bbid_from_insn(insnDst, log)
 
@@ -186,6 +188,7 @@ def map_regular_blocks(outMapFile, outLogFile):
 
 	return
 
+
 # Map critical edge-splitting blocks to oracle addresses. 
 # Matches oracle's cedge to tracer's based on source insn
 # and the critical edge's type (i.e., "fall" or "targ"),
@@ -207,7 +210,13 @@ def map_cedge_split(outMapFile, outLogFile):
 
 	return
 
-# TODO : comment
+
+# Map jump-mistargeted edges to their oracle addresses and
+# modification bytes. In this approach, we modify the last
+# 4/6 bytes of the block-terminating jump instruction to 
+# resolve to the 0-address target. This ensures satisfying
+# the jump conditional crashes the program, effectively
+# serving as an interrupt for non-fallthru critical edges. 
 
 def map_cedge_jmpmis(oracleZiprDir, outMapFile, outLogFile):
 	oracleDump = open("%s/c.out" % oracleZiprDir, "rb+")

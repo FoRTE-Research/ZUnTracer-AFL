@@ -263,7 +263,7 @@ def main():
 	outMapFile = open(outMapPath, "w+")
 	outLogFile = open(outLogPath, "w+")
 
-	outMapFile.write("# BLOCK_ID, INSN_ADDR, ADJST_ADDR, MOD_LEN, MOD_BYTES\n")
+	outMapFile.write("# BLOCK_ID, INSN_ADDR, MOD_ADDR, MOD_LEN, MOD_BYTES\n")
 
 	load_addr_map(oracleZiprDir)
 	load_bbid_map(tracerZiprDir)

@@ -13,6 +13,8 @@ addrMap        = []	         # (insn, oracle addr) map
 bbidMap	       = []	         # (insn, tracer bitmap ID) map
 oracleCedgeLst = []	         # Oracle binary ceb.map
 tracerCedgeLst = []	         # Tracer binary ceb.map
+#outMapSet      = set()       # Set of outMap entries
+outMapList 	   = []
 #------------------------------------------------------------
 
 # Stores mapping of instruction ID's to oracle addresses.
@@ -76,6 +78,7 @@ def load_cedge_lsts(oracleZiprDir, tracerZiprDir):
 	tracerCebFile.close()
 	
 	return
+
 
 # Given an instruction ID, retreives its tracer bitmap ID.
 
@@ -184,7 +187,8 @@ def map_regular_blocks(outMapFile, outLogFile):
 
 		if addr != -1:
 			addr = int(addr, 16) - int(offset, 16)
-			outMapFile.write("%i, %i, %i, 1, 0xCC\n" % (bbid, addr, addr))	
+			mapEnt = (bbid, addr, addr, 1, "0xCC")
+			outMapList.append(mapEnt)
 
 	return
 
@@ -194,7 +198,7 @@ def map_regular_blocks(outMapFile, outLogFile):
 # and the critical edge's type (i.e., "fall" or "targ"),
 # then retrieves oracle addr from source instruction.
 
-def map_cedge_split(outMapFile, outLogFile):
+def map_cedge_split(outMapSet, outLogFile):
 	for cedge in oracleCedgeLst:
 		broken 	= cedge[1]
 		insnDst = cedge[3]
@@ -206,7 +210,8 @@ def map_cedge_split(outMapFile, outLogFile):
 
 			if (bbid != -1):
 				addr = int(addr, 16) - int(offset, 16)
-				outMapFile.write("%i, %i, %i, 1, 0xCC\n" % (bbid, addr, addr))
+				mapEnt = (bbid, addr, addr, 1, "0xCC")
+				outMapList.append(mapEnt)
 
 	return
 
@@ -218,7 +223,7 @@ def map_cedge_split(outMapFile, outLogFile):
 # the jump conditional crashes the program, effectively
 # serving as an interrupt for non-fallthru critical edges. 
 
-def map_cedge_jmpmis(oracleZiprDir, outMapFile, outLogFile):
+def map_cedge_jmpmis(outMapSet, outLogFile, oracleZiprDir):
 	oracleDump = open("%s/c.out" % oracleZiprDir, "rb+")
 
 	for cedge in oracleCedgeLst:
@@ -238,8 +243,8 @@ def map_cedge_jmpmis(oracleZiprDir, outMapFile, outLogFile):
 				if check_insn_byte_length(cedge, insnDump, addrBase, outLogFile) == True:
 					targetAddr = -1*(int(addr, 16) + 6)
 					modBytes = get_hex_from_int(targetAddr)
-
-					outMapFile.write("%i, %i, %i, 4, %s\n" % (bbid, addrBase, addrBase+2, " ".join(modBytes)))
+					mapEnt = (bbid, addrBase, addrBase+2, 4, " ".join(modBytes))
+					outMapList.append(mapEnt)
 
 	return
 
@@ -271,7 +276,13 @@ def main():
 
 	map_regular_blocks(outMapFile, outLogFile)
 	map_cedge_split(outMapFile, outLogFile)
-	map_cedge_jmpmis(oracleZiprDir, outMapFile, outLogFile)
+	map_cedge_jmpmis(outMapFile, outLogFile, oracleZiprDir)
+
+	# Convert map to set to cull duplicates, and write to file
+
+	outMapSet = sorted(set(outMapList))
+	for entry in outMapSet:
+		outMapFile.write("%s, %s, %s, %s, %s\n" % (entry[0], entry[1], entry[2], entry[3], entry[4]))
 
 	outMapFile.close()
 	outLogFile.close()

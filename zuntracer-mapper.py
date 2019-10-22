@@ -4,15 +4,15 @@ import os, sys
 from capstone import *
 
 #------------------------------------------------------------
-oracleZiprDir  = ""		 # Path to oracle zipr dir
-tracerZiprDir  = ""		 # Path to tracer zipr dir
-outMapPath     = ""		 # Path to output mapping
-outLogPath     = "" 		 # Path to mapper error log
-offset         = "0x400000" 	 # Set for PIE/non-PIE bins
-addrMap        = []		 # (insn, oracle addr) map
-bbidMap	       = []	 	 # (insn, tracer bitmap ID) map
-oracleCedgeLst = []		 # Oracle binary ceb.map
-tracerCedgeLst = []		 # Tracer binary ceb.map
+oracleZiprDir  = ""	         # Path to oracle zipr dir
+tracerZiprDir  = ""		     # Path to tracer zipr dir
+outMapPath     = ""		     # Path to output mapping
+outLogPath     = ""          # Path to mapper error log
+offset         = "0x400000"  # Set for PIE/non-PIE bins
+addrMap        = []	         # (insn, oracle addr) map
+bbidMap	       = []	         # (insn, tracer bitmap ID) map
+oracleCedgeLst = []	         # Oracle binary ceb.map
+tracerCedgeLst = []	         # Tracer binary ceb.map
 #------------------------------------------------------------
 
 # Stores mapping of instruction ID's to oracle addresses.
@@ -83,15 +83,15 @@ def get_tracer_bbid_from_insn(insn, log):
 	matches = [i for i, pair in enumerate(bbidMap) if pair[0] == insn]
 
 	if len(matches) == 0:
-		log.write("ERROR: no bbid matches found for insn %s" % insn)
+		log.write("ERROR: no bbid matches found for insn %s\n" % insn)
 		return -1
 
 	if len(matches) > 1:
-		log.write("ERROR: multiple bbid matches found for insn %s" % insn)
+		log.write("ERROR: multiple bbid matches found for insn %s\n" % insn)
 		return -1
 
 	bbid = bbidMap[matches[0]][1]
-	log.write("Found bbid match for insn %s" % insn)
+	log.write("Found bbid match for insn %s\n" % insn)
 
 	return bbid
 
@@ -102,15 +102,15 @@ def get_oracle_addr_from_insn(insn, log):
 	matches = [i for i, pair in enumerate(addrMap) if pair[0] == insn]
 
 	if len(matches) == 0:
-		log.write("ERROR: no addr matches found for insn %s" % insn)
+		log.write("ERROR: no addr matches found for insn %s\n" % insn)
 		return -1
 
 	if len(matches) > 1:
-		log.write("ERROR: multiple addr matches found for insn %s" % insn)
+		log.write("ERROR: multiple addr matches found for insn %s\n" % insn)
 		return -1
 
 	addr = addrMap[matches[0]][1]
-	log.write("Found addr match for insn %s" % insn)
+	log.write("Found addr match for insn %s\n" % insn)
 
 	return addr
 
@@ -126,11 +126,11 @@ def get_tracer_bbid_from_cedge(cedge, log):
 			cand[2] == etype]
 
 	if len(matches) == 0:
-		log.write("ERROR: no cedge matches found for cedge (%s,%s)" % (insnSrc, etype))
+		log.write("ERROR: no cedge matches found for cedge (%s,%s)\n" % (insnSrc, etype))
 		return -1
 
 	if len(matches) > 1:
-		log.write("ERROR: multiple cedge matches found for cedge (%s,%s)" % (insnSrc, etype))
+		log.write("ERROR: multiple cedge matches found for cedge (%s,%s)\n" % (insnSrc, etype))
 		return -1
 
 	insnDst = tracerCedgeLst[matches[0]][3]
@@ -167,7 +167,7 @@ def check_insn_byte_length(cedge, dump, addr, log):
 	disas = list(md.disasm(dump, addr))[0]
 
 	if disas.size != 6:
-		log.write("ERROR: jump at cedge (%s,%s) not 6-byte length" % (insnSrc, etype))
+		log.write("ERROR: jump at cedge (%s,%s) not 6-byte length\n" % (insnSrc, etype))
 		return False 
 
 	return True

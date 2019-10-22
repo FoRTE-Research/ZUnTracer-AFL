@@ -4,15 +4,15 @@ import os, sys
 from capstone import *
 
 #------------------------------------------------------------
-oracleZiprDir 	= ""		 # Path to oracle zipr dir
-tracerZiprDir 	= ""		 # Path to tracer zipr dir
-outMapPath 	  	= ""		 # Path to output mapping
-outLogPath 	  	= "" 		 # Path to mapper error log
-offset        	= "0x400000" # Set for PIE/non-PIE bins
-addrMap 	  	= []		 # (insn, oracle addr) map
-bbidMap			= []	 	 # (insn, tracer bitmap ID) map
-oracleCedgeLst 	= []		 # Oracle binary ceb.map
-tracerCedgeLst 	= []		 # Tracer binary ceb.map
+oracleZiprDir  = ""		 # Path to oracle zipr dir
+tracerZiprDir  = ""		 # Path to tracer zipr dir
+outMapPath     = ""		 # Path to output mapping
+outLogPath     = "" 		 # Path to mapper error log
+offset         = "0x400000" # Set for PIE/non-PIE bins
+addrMap        = []		 # (insn, oracle addr) map
+bbidMap	       = []	 	 # (insn, tracer bitmap ID) map
+oracleCedgeLst = []		 # Oracle binary ceb.map
+tracerCedgeLst = []		 # Tracer binary ceb.map
 #------------------------------------------------------------
 
 # Stores mapping of instruction ID's to oracle addresses.
@@ -257,8 +257,8 @@ def main():
 
 	oracleZiprDir = sys.argv[1]
 	tracerZiprDir = sys.argv[2]	
-	outMapPath	  = sys.argv[3]
-	outLogPath 	  = sys.argv[4]
+	outMapPath    = sys.argv[3]
+	outLogPath    = sys.argv[4]
 
 	outMapFile = open(outMapPath, "w+")
 	outLogFile = open(outLogPath, "w+")

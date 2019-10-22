@@ -2,6 +2,7 @@
 
 import sys
 from capstone import *
+import struct
 
 #------------------------------------------------------------
 oracleZiprDir 	= ""		 # Path to oracle zipr dir
@@ -72,16 +73,6 @@ def load_cedge_lsts(oracleZiprDir, tracerZiprDir):
 	
 	return
 
-
-# Given a byte dump, return its disassembled instruction.
-
-def get_disasm_bytes(dump, addr):
-	md = Cs(CS_ARCH_X86, CS_MODE_64)
-	md.syntax = CS_OPT_SYNTAX_ATT
-	md.detail = True
-	return list(md.disasm(dump, int(addr, 16)))[0]
-
-
 # Given an instruction ID, retreives its tracer bitmap ID.
 
 def get_tracer_bbid_from_insn(insn, log):
@@ -122,23 +113,62 @@ def get_oracle_addr_from_insn(insn, log):
 
 # Retrieve the identical critical edge from tracer given an oracle cedge.
 
-def get_tracer_bbid_from_cedge(insnSrc, broken, etype, log):
-	matches = [i for i, cedg in enumerate(tracerCedgeLst) 
-		if  cedg[0] == insnSrc and
-			cedg[2] == etype]
+def get_tracer_bbid_from_cedge(cedge, log):
+	insnSrc = cedge[0]
+	etype = cedge[2]
+
+	matches = [i for i, cand in enumerate(tracerCedgeLst) 
+		if  cand[0] == insnSrc and
+			cand[2] == etype]
 
 	if len(matches) == 0:
-		log.write("ERROR: no cedge matches found for cedge (%s,%s,%s)" % (insnSrc, etype))
+		log.write("ERROR: no cedge matches found for cedge (%s,%s)" % (insnSrc, etype))
 		return -1
 
 	if len(matches) > 1:
-		log.write("ERROR: multiple cedge matches found for cedge (%s,%s,%s)" % (insnSrc, etype))
+		log.write("ERROR: multiple cedge matches found for cedge (%s,%s)" % (insnSrc, etype))
 		return -1
+
+	#print (tracerCedgeLst[matches[0]])
 
 	insnDst = tracerCedgeLst[matches[0]][3]
 	bbid = get_tracer_bbid_from_insn(insnDst, log)
 
 	return bbid
+
+
+# Helper func to compute 2's complement from integer. 
+# Borrowed from here: https://stackoverflow.com/a/43359133
+
+def get_hex_from_int(num):
+	OFFSET = 1 << 32
+	MASK = OFFSET - 1
+
+	dump = '%08x' % (num + OFFSET & MASK)
+	out = []
+
+	for i in range(0, 4):
+		out.append('0x' + dump[i * 2: i * 2 + 2])
+
+	return out[::-1]  # return in little endian
+
+
+# Given a instruction byte dump, return True if it is 6 bytes in length.
+
+def check_insn_byte_length(cedge, dump, addr, log):
+	insnSrc = cedge[0]
+	etype 	= cedge[2]
+
+	md = Cs(CS_ARCH_X86, CS_MODE_64)
+	md.syntax = CS_OPT_SYNTAX_ATT
+	md.detail = True
+	disas = list(md.disasm(dump, addr))[0]
+
+	if disas.size != 6:
+		log.write("ERROR: jump at cedge (%s,%s) not 6-byte length" % (insnSrc, etype))
+		return False 
+
+	return True
 
 
 # Map regular (i.e., interrupt-only) basic blocks.
@@ -163,14 +193,12 @@ def map_regular_blocks(outMapFile, outLogFile):
 
 def map_cedge_split(outMapFile, outLogFile):
 	for cedge in oracleCedgeLst:
-		insnSrc = cedge[0]
 		broken 	= cedge[1]
-		etype 	= cedge[2]
 		insnDst = cedge[3]
 
 		if (broken == "true"): # Denotes the edge was split with new block.
 
-			bbid = get_tracer_bbid_from_cedge(insnSrc, broken, etype, outLogFile)
+			bbid = get_tracer_bbid_from_cedge(cedge, outLogFile)
 			addr = get_oracle_addr_from_insn(insnDst, outLogFile)
 
 			if (bbid != -1):
@@ -178,6 +206,34 @@ def map_cedge_split(outMapFile, outLogFile):
 				outMapFile.write("%i, %i, %i, 1, 0xCC\n" % (bbid, addr, addr))
 
 	return
+
+# TODO : comment
+
+def map_cedge_jmpmis(oracleZiprDir, outMapFile, outLogFile):
+	oracleDump = open("%s/c.out" % oracleZiprDir, "rb+")
+
+	for cedge in oracleCedgeLst:
+		broken 	= cedge[1]
+		insnSrc = cedge[0]	
+
+		if (broken == "false"): # Denotes the edge was not split.
+
+			bbid = get_tracer_bbid_from_cedge(cedge, outLogFile)
+			addr = get_oracle_addr_from_insn(insnSrc, outLogFile) 
+
+			if (bbid != -1):
+				addrBase = int(addr, 16) - int(offset, 16)
+				oracleDump.seek(addrBase, 0)
+				insnDump = oracleDump.read(6)
+				
+				if check_insn_byte_length(cedge, insnDump, addrBase, outLogFile) == True:
+					targetAddr = -1*(int(addr, 16) + 6)
+					modBytes = get_hex_from_int(targetAddr)
+
+					outMapFile.write("%i, %i, %i, 4, %s\n" % (bbid, addrBase, addrBase+2, " ".join(modBytes)))
+
+	return
+
 
 # Main body
 
@@ -206,6 +262,7 @@ def main():
 
 	map_regular_blocks(outMapFile, outLogFile)
 	map_cedge_split(outMapFile, outLogFile)
+	map_cedge_jmpmis(oracleZiprDir, outMapFile, outLogFile)
 
 	outMapFile.close()
 	outLogFile.close()

@@ -149,7 +149,6 @@ EXP_ST u8  skip_deterministic,        /* Skip deterministic stages?       */
            term_too_small,            /* terminal dimensions too small    */
            uses_asan,                 /* Target uses ASAN?                */
            no_forkserver,             /* Disable forkserver?              */
-           crash_mode,                /* Crash mode! Yeah!                */
            in_place_resume,           /* Attempt in-place resume?         */
            auto_changed,              /* Auto-generated tokens changed?   */
            no_cpu_meter_red,          /* Feng shui on the status screen   */
@@ -262,7 +261,7 @@ static s32 cpu_core_count;            /* CPU core count                   */
 
 #ifdef HAVE_AFFINITY
 
-static s32 cpu_aff = -1;       	      /* Selected CPU core                */
+static s32 cpu_aff = -1;              /* Selected CPU core                */
 
 #endif /* HAVE_AFFINITY */
 
@@ -557,8 +556,6 @@ void setup_block_maps(){
     strcpy(bb_map_modb[bbid], mod_bytes);
     blocks_total++;
 
-    //printf("%d, %d, %d, %s\n", blocks_total, bbid, addr, mod_bytes);
-
     if (blocks_total > MAP_SIZE){
       SAYF("\n" cLRD "[-] " cRST
          "Uh-oh, looks %llu blocks were processed, exceeding the current bitmap size (%u).\n"
@@ -611,8 +608,6 @@ void modify_oracle(u8 * path_to_oracle){
 
     strcpy(mod_bytes, bb_map_modb[i]);
     free(bb_map_modb[i]);
-
-    printf ("%i, %d, %s\n", i, addr, mod_bytes);
 
     if (addr != 0){
 
@@ -2868,7 +2863,7 @@ static u8 calibrate_case(struct queue_entry* q, u8* use_mem,
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
        we want to bail out quickly. */
 
-    if (stop_soon || fault != crash_mode) goto abort_calibration;
+    if (stop_soon || fault != FAULT_NONE) goto abort_calibration;
 
     if (!stage_cur && !count_bytes(trace_bits)) {
       fault = FAULT_NOINST;
@@ -3019,7 +3014,7 @@ static void perform_dry_run() {
 
     if (stop_soon) return;
 
-    if (res == crash_mode || res == FAULT_NOBITS)
+    if (res == FAULT_NONE || res == FAULT_NOBITS)
       SAYF(cGRA "    len = %u, map size = %u, exec speed = %llu us\n" cRST, 
            q->len, q->bitmap_size, q->exec_us);
 
@@ -3028,8 +3023,6 @@ static void perform_dry_run() {
       case FAULT_NONE:
 
         if (q == queue) check_map_coverage();
-
-        if (crash_mode) FATAL("Test case '%s' does *NOT* crash", fn);
 
         break;
 
@@ -3073,8 +3066,6 @@ static void perform_dry_run() {
         }
 
       case FAULT_CRASH:  
-
-        if (crash_mode) break;
 
         if (skip_crashes) {
           WARNF("Test case results in a crash (skipping)");
@@ -3399,26 +3390,39 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
   s32 fd;
   u8  keeping = 0, res;
   u8  new_fault;
+  u8  not_a_real_crash = 0;
 
-  if (fault == FAULT_TRAP || (crash_mode && fault == FAULT_CRASH)) {
+  /* If we've hit an interrupt or a crash, process the test case. 
+     Interrupts are guaranteed new coverage, while crashes *may*
+     be due to jump-mistargeting. */
 
-    /* If triggering oracle interrupt, trace and get new signal. */ 
+  if ((fault == FAULT_TRAP) || (fault == FAULT_CRASH)){
+
+    /* If triggering oracle interrupt or crash, trace and get new signal. */ 
 
     new_fault = run_target(&tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, exec_tmout);
     trace_execs++;   
 
-    /* Like vanilla AFL, if we timeout during tracing discard the input. */
+    if (!stop_soon){ 
 
-    if (!stop_soon && new_fault == FAULT_TMOUT) {
-      trace_tmouts++;
-      goto keep_as_tmout;
+      /* Like vanilla AFL, if we timeout during tracing discard the input. */
+
+      if (new_fault == FAULT_TMOUT) {
+        trace_tmouts++;
+        goto keep_as_tmout;
+      }
+      
+      /* Like AFL also, if we encounter a crash in tracing then we skip queueing. */
+
+      if (new_fault == FAULT_CRASH) {
+        goto keep_as_crash;
+      }
     }
 
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
 
     if (!(hnb = has_new_bits(virgin_bits))) {
-      if (crash_mode) total_crashes++;
       trace_nnb++;
       return 0;
     }    
@@ -3474,6 +3478,11 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     if (!stop_soon && new_fault == FAULT_CRASH) goto keep_as_crash;
 
+    /* If here, this means the crash is due to jump-mistargeting. Set the following
+       flag to prevent the test case from being queued with the *actual* crashes. */
+
+    not_a_real_crash = 1;
+
   }
 
   switch (fault) {
@@ -3490,6 +3499,12 @@ keep_as_tmout:
       break;
 
     case FAULT_CRASH:
+
+      /* Check to see if we've already processed the test case; arriving here means the 
+         test cases crashed oracle due to jump-mistargeting, and didn't subsequently crash
+         the tracer; thus it's not a real crash so we don't want to save it as a crash. */
+
+      if (not_a_real_crash) return keeping;
 
 keep_as_crash:
 
@@ -3709,7 +3724,7 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps) {
              last_hang_time / 1000, total_execs - last_crash_execs,
              exec_tmout, use_banner,
              persistent_mode ? "persistent " : "", deferred_mode ? "deferred " : "",
-             (crash_mode || persistent_mode || deferred_mode) ? "" : "default", orig_cmdline);
+             (persistent_mode || deferred_mode) ? "" : "default", orig_cmdline);
              /* ignore errors */
 
   fclose(f);
@@ -4277,13 +4292,9 @@ static void show_stats(void) {
 
   /* Let's start by drawing a centered banner. */
 
-  banner_len = (crash_mode ? 24 : 22) + strlen(VERSION) + strlen(use_banner);
+  banner_len = (22) + strlen(VERSION) + strlen(use_banner);
   banner_pad = (80 - banner_len) / 2;
   memset(tmp, ' ', banner_pad);
-
-  //sprintf(tmp + banner_pad, "%s " cLCY VERSION cLGN
-  //        " (%s)",  crash_mode ? cPIN "peruvian were-rabbit" : 
-  //        cYEL "american fuzzy lop", use_banner);
 
   sprintf(tmp + banner_pad, "%s " cLCY "| based on AFL-" VERSION " |" cLGN " (%s)",  cLBL "ZUnTracer-AFL", use_banner);
 
@@ -4329,7 +4340,7 @@ static void show_stats(void) {
      except when resuming fuzzing or running in non-instrumented mode. */
 
   if (last_path_time || resuming_fuzz || queue_cycle == 1 ||
-      in_bitmap || crash_mode) {
+      in_bitmap) {
 
     SAYF(bV bSTOP "   last new path : " cRST "%-34s ",
          DTD(cur_ms, last_path_time));
@@ -4423,19 +4434,9 @@ static void show_stats(void) {
   sprintf(tmp, "%s (%s%s unique)", DI(total_crashes), DI(unique_crashes),
           (unique_crashes >= KEEP_UNIQUE_CRASH) ? "+" : "");
 
-  if (crash_mode) {
-
-    SAYF(bV bSTOP " total execs : " cRST "%-21s " bSTG bV bSTOP
-         "   new crashes : %s%-22s " bSTG bV "\n", DI(total_execs),
-         unique_crashes ? cLRD : cRST, tmp);
-
-  } else {
-
-    SAYF(bV bSTOP " total execs : " cRST "%-21s " bSTG bV bSTOP
-         " total crashes : %s%-22s " bSTG bV "\n", DI(total_execs),
-         unique_crashes ? cLRD : cRST, tmp);
-
-  }
+  SAYF(bV bSTOP " total execs : " cRST "%-21s " bSTG bV bSTOP
+       " total crashes : %s%-22s " bSTG bV "\n", DI(total_execs),
+       unique_crashes ? cLRD : cRST, tmp);
 
   /* Show a warning about slow execution. */
 
@@ -5341,7 +5342,7 @@ static u8 fuzz_one() {
 
     }
 
-    if (stop_soon || res != crash_mode) {
+    if (stop_soon || res != FAULT_NONE) {
       cur_skipped_paths++;
       goto abandon_entry;
     }
@@ -7379,8 +7380,7 @@ static void usage(u8* argv0) {
        "Other stuff:\n\n"
 
        "  -W text       - text banner to show on the screen\n"
-       "  -M / -S id    - distributed mode (see parallel_fuzzing.txt)\n"
-       "  -C            - crash exploration mode (the peruvian rabbit thing)\n\n"
+       "  -M / -S id    - distributed mode (see parallel_fuzzing.txt)\n\n"
 
        "For additional tips, please consult %s/README.\n\n",
 
@@ -7927,7 +7927,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:W:dCB:S:M:x:e:h:O:T:")) > 0) /* afl-eval */
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:W:dB:S:M:x:e:h:O:T:")) > 0) /* afl-eval */
 
     switch (opt) {
 
@@ -8094,12 +8094,6 @@ int main(int argc, char** argv) {
 
         in_bitmap = optarg;
         read_bitmap(in_bitmap);
-        break;
-
-      case 'C': /* crash mode */
-
-        if (crash_mode) FATAL("Multiple -C options not supported");
-        crash_mode = FAULT_CRASH;
         break;
 
       case 'W': /* banner */

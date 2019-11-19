@@ -507,6 +507,19 @@ void setup_tracer(){
 }
 
 
+/*  Helper function to adjust Non-PIE-compiled binary addresses. */
+
+int get_base_addr(unsigned int addr){
+
+  unsigned int base = 0x400000;
+
+  if (addr > base)
+    return (addr-base);
+
+  return addr;
+}
+
+
 /* Run our helper script to generate the correct addr-block mapping. */
 
 void setup_block_maps(){
@@ -533,13 +546,18 @@ void setup_block_maps(){
 
   /* Read and map block attr's, discarding those we don't care about. */
 
+  unsigned int addr_raw;
   int bbid, addr, mod_len;
   char mod_bytes[50];
 
-  while (fscanf(bb_map_file, "%d, %*d, %d, %d, %50[0-9a-zA-Z ]", 
-                        &bbid, &addr, &mod_len, mod_bytes) == 4)
+  //while (fscanf(bb_map_file, "%d, %*d, %d, %d, %50[0-9a-zA-Z ]", 
+  //                      &bbid, &addr, &mod_len, mod_bytes) == 4)  
+  while (fscanf(bb_map_file, "%d, %*x, %x, %d, %50[0-9a-zA-Z ]", 
+                        &bbid, &addr_raw, &mod_len, mod_bytes) == 4)
   {
     /* Update block address and modification length maps. */
+
+    addr = get_base_addr(addr_raw);
 
     bb_map_addr[bbid] = addr;
     bb_map_modl[bbid] = mod_len;
@@ -3396,6 +3414,8 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
      Interrupts are guaranteed new coverage, while crashes *may*
      be due to jump-mistargeting. */
 
+  //printf("%d\n", fault);
+
   if ((fault == FAULT_TRAP) || (fault == FAULT_CRASH)){
 
     /* If triggering oracle interrupt or crash, trace and get new signal. */ 
@@ -4479,7 +4499,7 @@ static void show_stats(void) {
 
   sprintf(tmp, "%0.02f%% / %i", ((float) blocks_seen * 100 / blocks_total), (int) blocks_total);
 
-  SAYF(bV bSTOP "  block coverage : %s%-16s" bSTG, cRST, tmp);
+  SAYF(bV bSTOP "  total coverage : %s%-16s" bSTG, cRST, tmp);
 
   SAYF(bSTOP "  trace tmouts (discarded) : " cRST "%-13s " bSTG bV "\n", DI(trace_tmouts));
 

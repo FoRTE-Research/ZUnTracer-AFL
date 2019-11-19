@@ -118,6 +118,9 @@ def load_zax_map(ZaxMapPath):
 def load_ceb_map(CebMapPath):
 	CebMap = set()
 
+	if (not os.path.exists(CebMapPath)):
+		return CebMap
+
 	with open(CebMapPath) as f:
 		for line in f.readlines()[1:]:
 			line = line.strip().split()
@@ -225,14 +228,19 @@ def map_standard_blocks():
 		if (len(matches) == 1):
 			ZiprEnt = matches[0]
 			entry = MapEntry(ZaxEnt.bbid, ZiprEnt.addr, ZiprEnt.addr, 1, "0xCC")
-			outLogFile.write("Found standard block: " \
+			outLogFile.write("Found block: " \
 				"[bbid:%s, addr:%s]\n" % (ZaxEnt.bbid, ZiprEnt.addr))
 			outMap.append(entry)	
 
-		# If there's multiple matches, we're doing something wrong.		
+		# Handle discrepancies.
 
 		if (len(matches) > 1):
-			outLogFile.write("ERROR: multiple oracle ZiprEnt's for tracer ZaxEnt: " \
+			outLogFile.write("ERR_MULT: multiple oracle ZiprEnt's for tracer ZaxEnt: " \
+				"[bbid:%s, insn:%s]\n" % (ZaxEnt.bbid, ZaxEnt.insn))
+			continue
+
+		if (len(matches) == 0):
+			outLogFile.write("ERR_ZERO: zero oracle ZiprEnt's for tracer ZaxEnt: " \
 				"[bbid:%s, insn:%s]\n" % (ZaxEnt.bbid, ZaxEnt.insn))
 			continue
 
@@ -281,26 +289,52 @@ def map_critedge_split():
 				if (len(matchesZipr) == 1):
 					ZiprEnt = matchesZipr[0]
 					entry = MapEntry(ZaxEnt.bbid, ZiprEnt.addr, ZiprEnt.addr, 1, "0xCC")
-					outLogFile.write("Found critical edge (split): " \
+					outLogFile.write("Found cedge (split): " \
 						"[bbid:%s, addr:%s]\n" % (ZaxEnt.bbid, ZiprEnt.addr))
 					outMap.append(entry)	
 
+				# Handle discrepancies.
+
 				if (len(matchesZipr) > 1):
-					outLogFile.write("ERROR: multiple oracle ZiprEnt's for tracer ZaxEnt: " \
+					outLogFile.write("ERR_MULT: multiple oracle ZiprEnt's for tracer ZaxEnt: " \
 						"[bbid:%s, insn:%s]\n" % \
 						(ZaxEnt.bbid, ZaxEnt.insn))
 					continue
 
+				if (len(matchesZipr) == 0):
+					outLogFile.write("ERR_ZERO: zero oracle ZiprEnt's for tracer ZaxEnt: " \
+						"[bbid:%s, insn:%s]\n" % \
+						(ZaxEnt.bbid, ZaxEnt.insn))
+					continue
+
+			# Handle discrepancies.
+
 			if (len(matchesZax) > 1):
-				outLogFile.write("ERROR: multiple tracer ZaxEnt's for tracer CebEnt: " \
-					"[insnOld:%s, insnNew:%s, etype:%s, broken%s]\n" % \
+				outLogFile.write("ERR_MULT: multiple tracer ZaxEnt's for tracer CebEnt: " \
+					"[insnOld:%s, insnNew:%s, etype:%s, broken:%s]\n" % \
 					(tracerCebEnt.insnOld, tracerCebEnt.insnNew, \
 					tracerCebEnt.etype, tracerCebEnt.broken))
 				continue
 
+			if (len(matchesZax) == 0):
+				outLogFile.write("ERR_ZERO: zero tracer ZaxEnt's for tracer CebEnt: " \
+					"[insnOld:%s, insnNew:%s, etype:%s, broken:%s]\n" % \
+					(tracerCebEnt.insnOld, tracerCebEnt.insnNew, \
+					tracerCebEnt.etype, tracerCebEnt.broken))
+				continue
+
+		# Handle discrepancies
+
 		if (len(matchesCeb) > 1):
-			outLogFile.write("ERROR: multiple tracer CebEnt's for oracle CebEnt: " \
-				"[insnOld:%s, insnNew:%s, etype:%s, broken%s]\n" % \
+			outLogFile.write("ERR_MULT: multiple tracer CebEnt's for oracle CebEnt: " \
+				"[insnOld:%s, insnNew:%s, etype:%s, broken:%s]\n" % \
+				(oracleCebEnt.insnOld, oracleCebEnt.insnNew, \
+				oracleCebEnt.etype, oracleCebEnt.broken))
+			continue
+		
+		if (len(matchesCeb) == 0):
+			outLogFile.write("ERR_ZERO: zero tracer CebEnt's for oracle CebEnt: " \
+				"[insnOld:%s, insnNew:%s, etype:%s, broken:%s]\n" % \
 				(oracleCebEnt.insnOld, oracleCebEnt.insnNew, \
 				oracleCebEnt.etype, oracleCebEnt.broken))
 			continue
@@ -367,26 +401,53 @@ def map_critedge_jmpmis():
 					jmModAddr   = addr_plus_offset(addr, 2)
 
 					entry = MapEntry(ZaxEnt.bbid, ZiprEnt.addr, jmModAddr, 4, " ".join(jmTargBytes))
-					outLogFile.write("Found critical edge (jump mistarg): " \
+
+					outLogFile.write("Found cedge (jmpmis): " \
 						"[bbid:%s, addr:%s]\n" % (ZaxEnt.bbid, ZiprEnt.addr))
-					outMap.append(entry)	
+					outMap.append(entry)
+
+				# Handle discrepancies.	
 
 				if (len(matchesZipr) > 1):
-					outLogFile.write("ERROR: multiple oracle ZiprEnt's for tracer ZaxEnt: " \
+					outLogFile.write("ERR_MULT: multiple oracle ZiprEnt's for tracer ZaxEnt: " \
 						"[bbid:%s, insn:%s]\n" % \
 						(ZaxEnt.bbid, ZaxEnt.insn))
 					continue
 
+				if (len(matchesZipr) == 0):
+					outLogFile.write("ERR_ZERO: zero oracle ZiprEnt's for tracer ZaxEnt: " \
+						"[bbid:%s, insn:%s]\n" % \
+						(ZaxEnt.bbid, ZaxEnt.insn))
+					continue
+
+			# Handle discrepancies.
+
 			if (len(matchesZax) > 1):
-				outLogFile.write("ERROR: multiple tracer ZaxEnt's for tracer CebEnt: " \
-					"[insnOld:%s, insnNew:%s, etype:%s, broken%s]\n" % \
+				outLogFile.write("ERR_MULT: multiple tracer ZaxEnt's for tracer CebEnt: " \
+					"[insnOld:%s, insnNew:%s, etype:%s, broken:%s]\n" % \
 					(tracerCebEnt.insnOld, tracerCebEnt.insnNew, \
 					tracerCebEnt.etype, tracerCebEnt.broken))
 				continue
 
+			if (len(matchesZax) == 0):
+				outLogFile.write("ERR_ZERO: zero tracer ZaxEnt's for tracer CebEnt: " \
+					"[insnOld:%s, insnNew:%s, etype:%s, broken:%s]\n" % \
+					(tracerCebEnt.insnOld, tracerCebEnt.insnNew, \
+					tracerCebEnt.etype, tracerCebEnt.broken))
+				continue
+
+		# Handle discrepancies.
+
 		if (len(matchesCeb) > 1):
-			outLogFile.write("ERROR: multiple tracer CebEnt's for oracle CebEnt: " \
-				"[insnOld:%s, insnNew:%s, etype:%s, broken%s]\n" % \
+			outLogFile.write("ERR_MULT: multiple tracer CebEnt's for oracle CebEnt: " \
+				"[insnOld:%s, insnNew:%s, etype:%s, broken:%s]\n" % \
+				(oracleCebEnt.insnOld, oracleCebEnt.insnNew, \
+				oracleCebEnt.etype, oracleCebEnt.broken))
+			continue
+
+		if (len(matchesCeb) == 0):
+			outLogFile.write("ERR_ZERO: zero tracer CebEnt's for oracle CebEnt: " \
+				"[insnOld:%s, insnNew:%s, etype:%s, broken:%s]\n" % \
 				(oracleCebEnt.insnOld, oracleCebEnt.insnNew, \
 				oracleCebEnt.etype, oracleCebEnt.broken))
 			continue

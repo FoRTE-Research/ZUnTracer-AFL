@@ -100,7 +100,9 @@ EXP_ST u64 blocks_total = 0,          /* Number total basic blocks        */
            trace_execs = 0,           /* Number traced testcases          */
            trace_queued = 0,          /* Number queued testcases          */
            trace_tmouts = 0,          /* Number trace timeouts            */
-           trace_nnb = 0;             /* Number traced w/o new bits       */
+           trace_nnb = 0,             /* Number traced w/o new bits       */
+           queued_intrpt = 0,         /* Num. queued that hit interrupt.  */
+           queued_jmpmis = 0;         /* Num. queued that hit jmpmistarg. */
 
 EXP_ST s32 oracle_fsrv_ctl_fd,        /* Forkserver control pipes         */
            tracer_fsrv_ctl_fd,
@@ -3475,6 +3477,12 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
       queued_with_cov++;
     }
 
+    if (fault == FAULT_TRAP)
+      queued_intrpt++;
+
+    if (fault == FAULT_CRASH)
+      queued_jmpmis++;
+
     queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
     /* Try to calibrate inline; this also calls update_bitmap_score() when
@@ -4509,6 +4517,8 @@ static void show_stats(void) {
 
   SAYF(bSTOP " no new bits (discarded) : " cRST "%-13s " bSTG bV "\n", DI(trace_nnb));
 
+  SAYF(bV bSTOP "\t\t\t\t\thit interrupt (queued) : " cRST "%-13s " bSTG bV "\n", DI(queued_intrpt));
+  SAYF(bV bSTOP "\t\t\t\t\thit mistarget (queued) : " cRST "%-13s " bSTG bV "\n", DI(queued_jmpmis));
 
   /* Aaaalmost there... hold on! */
 

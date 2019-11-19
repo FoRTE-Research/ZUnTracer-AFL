@@ -88,12 +88,9 @@ char ** oracle_argv;
 char ** tracer_argv;                
 
 int oracle_cov[MAP_SIZE];             /* Arrays of covered block ID's     */
-int bb_map_addr[MAP_SIZE];            /* Array of all basic blocks        */
-int bb_map_modl[MAP_SIZE];          
-//char *bb_map_modb[MAP_SIZE];
-//char ** bb_map_modb;// = malloc(sizeof(char*) * MAP_SIZE);
-//char bb_map_modb[MAP_SIZE][50];
-char * bb_map_modb[MAP_SIZE];
+int bb_map_addr[MAP_SIZE];            /* Array of all basic block ID's    */
+int bb_map_modl[MAP_SIZE];            /* Array of all block mod lengths.  */
+char * bb_map_modb[MAP_SIZE];         /* Array of all block mod bytes.    */
 
 EXP_ST u64 blocks_total = 0,          /* Number total basic blocks        */
            blocks_seen = 0,           /* Number of visited basic blocks   */
@@ -102,7 +99,9 @@ EXP_ST u64 blocks_total = 0,          /* Number total basic blocks        */
            trace_tmouts = 0,          /* Number trace timeouts            */
            trace_nnb = 0,             /* Number traced w/o new bits       */
            queued_intrpt = 0,         /* Num. queued that hit interrupt.  */
-           queued_jmpmis = 0;         /* Num. queued that hit jmpmistarg. */
+           queued_jmpmis = 0,         /* Num. queued that hit jmpmistarg. */
+           oracle_crashes = 0,        /* Num. oracle crashes (for debug). */
+           oracle_intrpts = 0;        /* Num. oracle intrpts (for debug). */
 
 EXP_ST s32 oracle_fsrv_ctl_fd,        /* Forkserver control pipes         */
            tracer_fsrv_ctl_fd,
@@ -3420,6 +3419,14 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
   if ((fault == FAULT_TRAP) || (fault == FAULT_CRASH)){
 
+    /* Log debugging-related stats. */
+
+    if (fault == FAULT_TRAP)
+      oracle_intrpts++;
+
+    if (fault == FAULT_CRASH)
+      oracle_crashes++;
+
     /* If triggering oracle interrupt or crash, trace and get new signal. */ 
 
     new_fault = run_target(&tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, exec_tmout);
@@ -3476,6 +3483,8 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
       queue_top->has_new_cov = 1;
       queued_with_cov++;
     }
+
+    /* Log queue-related stats. */
 
     if (fault == FAULT_TRAP)
       queued_intrpt++;
@@ -4490,7 +4499,7 @@ static void show_stats(void) {
   else
     sprintf(tmp, "%s", DI(total_tmouts));
 
-  SAYF (bSTG bV bSTOP "  total tmouts  : " cRST "%-22s" bSTG bV "\n", tmp);
+  SAYF (bSTG bV bSTOP "  total tmouts : " cRST "%-23s" bSTG bV "\n", tmp);
 
   /* Show total calibration and trimming execution totals. */
   
@@ -4517,8 +4526,13 @@ static void show_stats(void) {
 
   SAYF(bSTOP " no new bits (discarded) : " cRST "%-13s " bSTG bV "\n", DI(trace_nnb));
 
-  SAYF(bV bSTOP "\t\t\t\t\thit interrupt (queued) : " cRST "%-13s " bSTG bV "\n", DI(queued_intrpt));
-  SAYF(bV bSTOP "\t\t\t\t\thit mistarget (queued) : " cRST "%-13s " bSTG bV "\n", DI(queued_jmpmis));
+  SAYF(bV bSTOP "  oracle intrpts : " cRST "%-17s " bSTG, DI(oracle_intrpts));
+
+  SAYF(bSTOP "  hit interrupt (queued) : " cRST "%-13s " bSTG bV "\n", DI(queued_intrpt));
+ 
+  SAYF(bV bSTOP "  oracle crashes : " cRST "%-17s " bSTG, DI(oracle_crashes));
+
+  SAYF(bSTOP "  hit mistarget (queued) : " cRST "%-13s " bSTG bV "\n", DI(queued_intrpt));
 
   /* Aaaalmost there... hold on! */
 

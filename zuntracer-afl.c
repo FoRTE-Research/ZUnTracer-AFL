@@ -3415,8 +3415,6 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
      Interrupts are guaranteed new coverage, while crashes *may*
      be due to jump-mistargeting. */
 
-  //printf("%d\n", fault);
-
   if ((fault == FAULT_TRAP) || (fault == FAULT_CRASH)){
 
     /* Log debugging-related stats. */

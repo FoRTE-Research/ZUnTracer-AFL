@@ -525,8 +525,8 @@ int get_base_addr(unsigned int addr){
 
 void setup_block_maps(){
 
-  bb_map_path = alloc_printf("%s/.bblist", out_dir);  
-  char * log_path  = alloc_printf("%s/.bblst.log", out_dir);
+  bb_map_path = alloc_printf("%s/bbmap", out_dir);  
+  char * log_path  = alloc_printf("%s/bbmap.log", out_dir);
   char * map_args[] = {"zuntracer-mapper.py", oracle_zipr_dir, tracer_zipr_dir, bb_map_path, log_path, NULL};
   execute(map_args, "zuntracer-mapper.py", 1);  
 

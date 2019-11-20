@@ -4530,7 +4530,7 @@ static void show_stats(void) {
  
   SAYF(bV bSTOP "  oracle crashes : " cRST "%-17s " bSTG, DI(oracle_crashes));
 
-  SAYF(bSTOP "  hit mistarget (queued) : " cRST "%-13s " bSTG bV "\n", DI(queued_intrpt));
+  SAYF(bSTOP "  hit mistarget (queued) : " cRST "%-13s " bSTG bV "\n", DI(queued_jmpmis));
 
   /* Aaaalmost there... hold on! */
 

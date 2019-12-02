@@ -88,20 +88,20 @@ char ** oracle_argv;
 char ** tracer_argv;                
 
 int oracle_cov[MAP_SIZE];             /* Arrays of covered block ID's     */
-int bb_map_addr[MAP_SIZE];            /* Array of all basic block ID's    */
-int bb_map_modl[MAP_SIZE];            /* Array of all block mod lengths.  */
-char * bb_map_modb[MAP_SIZE];         /* Array of all block mod bytes.    */
+int bbmap_addr[MAP_SIZE];             /* Array of all basic block ID's    */
+int bbmap_modl[MAP_SIZE];             /* Array of all block mod lengths   */
+char * bbmap_modb[MAP_SIZE];          /* Array of all block mod bytes     */
 
 EXP_ST u64 blocks_total = 0,          /* Number total basic blocks        */
            blocks_seen = 0,           /* Number of visited basic blocks   */
            trace_execs = 0,           /* Number traced testcases          */
            trace_queued = 0,          /* Number queued testcases          */
            trace_tmouts = 0,          /* Number trace timeouts            */
-           trace_nnb = 0,             /* Number traced w/o new bits       */
-           queued_intrpt = 0,         /* Num. queued that hit interrupt.  */
-           queued_jmpmis = 0,         /* Num. queued that hit jmpmistarg. */
-           oracle_crashes = 0,        /* Num. oracle crashes (for debug). */
-           oracle_intrpts = 0;        /* Num. oracle intrpts (for debug). */
+           trace_nnbits = 0,          /* Number traced w/o new bits       */
+           queued_intrpt = 0,         /* Num. queued that hit interrupt   */
+           queued_jmpmis = 0,         /* Num. queued that hit jmpmistarg  */
+           oracle_crashes = 0,        /* Num. oracle crashes (for debug)  */
+           oracle_intrpts = 0;        /* Num. oracle intrpts (for debug)  */
 
 EXP_ST s32 oracle_fsrv_ctl_fd,        /* Forkserver control pipes         */
            tracer_fsrv_ctl_fd,
@@ -115,7 +115,8 @@ EXP_ST s32 oracle_fsrv_ctl_fd,        /* Forkserver control pipes         */
 EXP_ST u8 *target_path,               /* Path to target binary            */
           *oracle_path,               /* Path to oracle binary            */    
           *tracer_path,               /* Path to tracer binary            */
-          *bb_map_path,               /* Path to basic block list         */ 
+          *bbmap_path,                /* Path to basic block list         */ 
+          *in_bbmap,                  /* Path to user-specified bbmap     */
           *oracle_zipr_dir,           /* Oracle zipr directory            */
           *tracer_zipr_dir;           /* Tracer zipr directory            */
 
@@ -127,7 +128,6 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *sync_dir,                  /* Synchronization directory        */
           *sync_id,                   /* Fuzzer ID                        */
           *use_banner,                /* Display banner                   */
-          *in_bitmap,                 /* Input bitmap                     */
           *doc_path,                  /* Path to documentation dir        */
           *target_path,               /* Path to target binary            */
           *orig_cmdline;              /* Original command line            */
@@ -399,9 +399,9 @@ void execute(char * tmp[], char * pid_name, int print_output){
 }
 
 
-/* Helper function to copy files. */
+/* Helper function to copy files, and set chmod accordingly. */
 
-void copy_binary(char* src_path, char* dst_path){
+void copy_file(char* src_path, char* dst_path, int set_chmod){
 
   struct stat st = {0};
   stat(src_path, &st);
@@ -411,19 +411,20 @@ void copy_binary(char* src_path, char* dst_path){
   FILE * dst_file = fopen(dst_path, "wb");
 
   if (fread(data, 1, st.st_size, src_file) != st.st_size) {
-    perror("fread in copy_binary()");
+    perror("fread in copy_file()");
     exit(EXIT_FAILURE);
   }
 
   if(fwrite(data, 1, st.st_size, dst_file) != st.st_size) {
-    perror("fwrite in copy_binary()");
+    perror("fwrite in copy_file()");
     exit(EXIT_FAILURE);
   }
 
   fclose(src_file);
   fclose(dst_file);
 
-  chmod(dst_path, 0777);
+  if (set_chmod > 0)
+    chmod(dst_path, set_chmod);
   
   return;
 }
@@ -478,7 +479,7 @@ void setup_oracle(){
 
   else{
     char * tmp2 = alloc_printf("%s/c.out", oracle_zipr_dir);
-    copy_binary(tmp2, oracle_path);
+    copy_file(tmp2, oracle_path, 0777);
   }
 
   return;
@@ -501,7 +502,7 @@ void setup_tracer(){
 
   else{
     char * tmp2 = alloc_printf("%s/c.out", tracer_zipr_dir);
-    copy_binary(tmp2, tracer_path);
+    copy_file(tmp2, tracer_path, 0777);
   }
 
   return;
@@ -525,23 +526,33 @@ int get_base_addr(unsigned int addr){
 
 void setup_block_maps(){
 
-  bb_map_path = alloc_printf("%s/bbmap", out_dir);  
-  char * log_path  = alloc_printf("%s/bbmap.log", out_dir);
-  char * map_args[] = {"zuntracer-mapper.py", oracle_zipr_dir, tracer_zipr_dir, bb_map_path, log_path, NULL};
-  execute(map_args, "zuntracer-mapper.py", 1);  
+  /* If bbmap not passed in (-B), we need to generate it.
+     Otherwise, just copy it to our fuzzing out dir. */
+
+  bbmap_path = alloc_printf("%s/bbmap", out_dir);  
+
+  if (!in_bbmap){
+    char * log_path  = alloc_printf("%s/bbmap.log", out_dir);
+    char * map_args[] = {"zuntracer-mapper.py", oracle_zipr_dir, tracer_zipr_dir, bbmap_path, log_path, NULL};
+    execute(map_args, "zuntracer-mapper.py", 1);  
+  }
+
+  else{
+    copy_file(in_bbmap, bbmap_path, 0);
+  }
 
   /* Reads a list of basic blocks from file and populates a new array. */
 
-  FILE * bb_map_file = fopen(bb_map_path, "r");
-  if (bb_map_file == NULL){
-    perror("fopen() bb_map_path");
+  FILE * bbmap_file = fopen(bbmap_path, "r");
+  if (bbmap_file == NULL){
+    perror("fopen() bbmap_path");
     exit(EXIT_FAILURE);   
   }
 
   /* Discard header row. */
 
-  if (fscanf(bb_map_file, "%*[^\n]") < 0){
-    perror("fscanf() bb_map_path header");
+  if (fscanf(bbmap_file, "%*[^\n]") < 0){
+    perror("fscanf() bbmap_path header");
     exit(EXIT_FAILURE);
   }  
 
@@ -551,28 +562,26 @@ void setup_block_maps(){
   int bbid, addr, mod_len;
   char mod_bytes[50];
 
-  //while (fscanf(bb_map_file, "%d, %*d, %d, %d, %50[0-9a-zA-Z ]", 
-  //                      &bbid, &addr, &mod_len, mod_bytes) == 4)  
-  while (fscanf(bb_map_file, "%d, %*x, %x, %d, %50[0-9a-zA-Z ]", 
+  while (fscanf(bbmap_file, "%d, %*x, %x, %d, %50[0-9a-zA-Z ]", 
                         &bbid, &addr_raw, &mod_len, mod_bytes) == 4)
   {
     /* Update block address and modification length maps. */
 
     addr = get_base_addr(addr_raw);
 
-    bb_map_addr[bbid] = addr;
-    bb_map_modl[bbid] = mod_len;
+    bbmap_addr[bbid] = addr;
+    bbmap_modl[bbid] = mod_len;
 
-    if (bb_map_addr == 0)
+    if (bbmap_addr == 0)
       continue;
 
     /* Update block modification bytes map. */
 
-    if ((bb_map_modb[bbid] = malloc(sizeof(char) * 50)) == NULL) {
-      perror("malloc() bb_map_modb");
+    if ((bbmap_modb[bbid] = malloc(sizeof(char) * 50)) == NULL) {
+      perror("malloc() bbmap_modb");
       exit(EXIT_FAILURE);
     }
-    strcpy(bb_map_modb[bbid], mod_bytes);
+    strcpy(bbmap_modb[bbid], mod_bytes);
     blocks_total++;
 
     if (blocks_total > MAP_SIZE){
@@ -586,7 +595,7 @@ void setup_block_maps(){
     }
   }
 
-  fclose(bb_map_file);
+  fclose(bbmap_file);
 
   return;
 }
@@ -619,14 +628,14 @@ void modify_oracle(u8 * path_to_oracle){
 
     /* Obtain mapped address, modification length and bytes. */
 
-    if (!bb_map_addr[i])
+    if (!bbmap_addr[i])
       continue;
 
-    addr = bb_map_addr[i];
+    addr = bbmap_addr[i];
     char mod_bytes[50];
 
-    strcpy(mod_bytes, bb_map_modb[i]);
-    free(bb_map_modb[i]);
+    strcpy(mod_bytes, bbmap_modb[i]);
+    free(bbmap_modb[i]);
 
     if (addr != 0){
 
@@ -686,13 +695,13 @@ int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){
 
     /* If this block wasn't traced or we've reset it before, go to next one. */
 
-    if (!trace_bits[i] || blocks_cov[i] || !bb_map_addr[i])
+    if (!trace_bits[i] || blocks_cov[i] || !bbmap_addr[i])
       continue;
 
     /* Pull mapped block addresses and modification byte length. */
 
-    mod_len = bb_map_modl[i];
-    offset_target = bb_map_addr[i];   
+    mod_len = bbmap_modl[i];
+    offset_target = bbmap_addr[i];   
     offset_oracle = offset_target;
 
     /* Seek to position and read/reset mod_len # of bytes. 
@@ -1253,22 +1262,6 @@ EXP_ST void write_bitmap(void) {
 
 }
 
-
-/* Read bitmap from file. This is for the -B option again. */
-
-EXP_ST void read_bitmap(u8* fname) {
-
-  s32 fd = open(fname, O_RDONLY);
-
-  if (fd < 0) PFATAL("Unable to open '%s'", fname);
-
-  ck_read(fd, virgin_bits, MAP_SIZE, fname);
-
-  close(fd);
-
-}
-
-
 /* Check if the current execution path brings anything new to the table.
    Update virgin bits to reflect the finds. Returns 1 if the only change is
    the hit-count for a particular tuple; 2 if there are new tuples seen. 
@@ -1745,7 +1738,7 @@ EXP_ST void setup_shm(void) {
 
   u8* shm_str;
 
-  if (!in_bitmap) memset(virgin_bits, 255, MAP_SIZE);
+  memset(virgin_bits, 255, MAP_SIZE);
 
   memset(virgin_tmout, 255, MAP_SIZE);
   memset(virgin_crash, 255, MAP_SIZE);
@@ -3151,7 +3144,7 @@ static void perform_dry_run() {
 
         useless_at_start++;
 
-        if (!in_bitmap && !shuffle_queue)
+        if (!shuffle_queue)
           WARNF("No new instrumentation output, test case may be useless.");
 
         break;
@@ -3413,11 +3406,11 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
   /* If we've hit an interrupt or a crash, process the test case. 
      Interrupts are guaranteed new coverage, while crashes *may*
-     be due to jump-mistargeting. */
+     be due either to jump-mistargeting or a real crash. */
 
   if ((fault == FAULT_TRAP) || (fault == FAULT_CRASH)){
 
-    /* Log debugging-related stats. */
+    /* Log related stats. */
 
     if (fault == FAULT_TRAP)
       oracle_intrpts++;
@@ -3425,7 +3418,7 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
     if (fault == FAULT_CRASH)
       oracle_crashes++;
 
-    /* If triggering oracle interrupt or crash, trace and get new signal. */ 
+    /* If triggering oracle interrupt or crash, trace and store new signal. */ 
 
     new_fault = run_target(&tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, exec_tmout);
     trace_execs++;   
@@ -3450,7 +3443,7 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
        future fuzzing, etc. */
 
     if (!(hnb = has_new_bits(virgin_bits))) {
-      trace_nnb++;
+      trace_nnbits++;
       return 0;
     }    
 
@@ -3511,7 +3504,8 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     /* If we hit crash on tracing, we want it queued but also saved as a crash. */
 
-    if (!stop_soon && new_fault == FAULT_CRASH) goto keep_as_crash;
+    if (!stop_soon && new_fault == FAULT_CRASH) 
+      goto keep_as_crash;
 
     /* If here, this means the crash is due to jump-mistargeting. Set the following
        flag to prevent the test case from being queued with the *actual* crashes. */
@@ -3716,12 +3710,19 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps) {
              "trim_execs        : %llu\n" 
              "calib_execs       : %llu\n"
              "hang_execs        : %llu\n"
+             "trace_execs       : %llu\n"
              "sync_execs        : %llu\n"
 
-             "trace_execs       : %llu\n"
-             "trace_queued      : %llu\n"
+             "total_traced      : %llu\n" /* CGT-related stats */
+             "oracle_intrpts    : %llu\n"
+             "oracle_crashes    : %llu\n"
              "trace_tmouts      : %llu\n"
-             "trace_nnb         : %llu\n"
+             "trace_nnbits      : %llu\n"
+             "trace_crashes     : %llu\n"
+
+             "total_queued      : %llu\n"
+             "queued_intrpt     : %llu\n" 
+             "queued_jmpmis     : %llu\n"
 
              "execs_per_sec     : %0.02f\n"
              "paths_total       : %u\n"
@@ -3749,8 +3750,11 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps) {
              start_time / 1000, get_cur_time() / 1000, getpid(),
              queue_cycle ? (queue_cycle - 1) : 0, 
 
-             norm_execs, total_execs, trim_execs, calib_execs, hang_execs, sync_execs, /* afl-eval */ 
-             trace_execs, trace_queued, trace_tmouts, trace_nnb,
+             norm_execs, total_execs, trim_execs, calib_execs, hang_execs, trace_execs, sync_execs, /* afl-eval */ 
+             //trace_execs, trace_queued, trace_tmouts, trace_nnbits,
+             trace_execs, oracle_intrpts, oracle_crashes, 
+             trace_tmouts, trace_nnbits, total_crashes,
+             trace_queued, queued_intrpt, queued_jmpmis,
 
              eps, queued_paths, queued_favored, queued_discovered, queued_imported,
              max_depth, current_entry, pending_favored, pending_not_fuzzed,
@@ -3804,17 +3808,20 @@ static void maybe_update_plot_file(double bitmap_cvg, double eps) {
   fprintf(plot_file, 
           "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, "
           
-          "%llu, %llu, %llu, %llu, %llu, %llu, "
+          "%llu, %llu, %llu, %llu, %llu, %llu, %llu, "  /* afl-eval */
 
-          "%llu, %llu, %llu, %llu\n", /* afl-eval */
+          "%llu, %llu, %llu, %llu, %llu, %llu, " /* CGT-related stats */
+          "%llu, %llu, %llu\n",
 
           get_cur_time() / 1000, queue_cycle - 1, current_entry, queued_paths,
           pending_not_fuzzed, pending_favored, bitmap_cvg, unique_crashes,
           unique_hangs, max_depth, eps, /* ignore errors */
 
-          norm_execs, total_execs, trim_execs, calib_execs, hang_execs, sync_execs, /* afl-eval */
+          norm_execs, total_execs, trim_execs, calib_execs, hang_execs, trace_execs, sync_execs, /* afl-eval */
 
-          trace_execs, trace_queued, trace_tmouts, trace_nnb); 
+          trace_execs, oracle_intrpts, oracle_crashes, trace_tmouts, trace_nnbits, total_crashes,
+          
+          trace_queued, queued_intrpt, queued_jmpmis); 
 
   fflush(plot_file);
 
@@ -4374,8 +4381,7 @@ static void show_stats(void) {
   /* We want to warn people about not seeing new paths after a full cycle,
      except when resuming fuzzing or running in non-instrumented mode. */
 
-  if (last_path_time || resuming_fuzz || queue_cycle == 1 ||
-      in_bitmap) {
+  if (last_path_time || resuming_fuzz || queue_cycle == 1) {
 
     SAYF(bV bSTOP "   last new path : " cRST "%-34s ",
          DTD(cur_ms, last_path_time));
@@ -4522,7 +4528,7 @@ static void show_stats(void) {
 
   SAYF(bV bSTOP " traced / queued : " cRST "%-17s " bSTG, tmp);
 
-  SAYF(bSTOP " no new bits (discarded) : " cRST "%-13s " bSTG bV "\n", DI(trace_nnb));
+  SAYF(bSTOP " no new bits (discarded) : " cRST "%-13s " bSTG bV "\n", DI(trace_nnbits));
 
   SAYF(bV bSTOP "  oracle intrpts : " cRST "%-17s " bSTG, DI(oracle_intrpts));
 
@@ -4735,7 +4741,7 @@ static void show_init_stats(void) {
       WARNF("Some test cases are big (%s) - see %s/perf_tips.txt.",
             DMS(max_len), doc_path);
 
-    if (useless_at_start && !in_bitmap)
+    if (useless_at_start)
       WARNF(cLRD "Some test cases look useless. Consider using a smaller set.");
 
     if (queued_paths > 100)
@@ -7553,10 +7559,11 @@ EXP_ST void setup_dirs_fds(void) {
                      "unique_hangs, max_depth, execs_per_sec, "
 
                      "execs_norm, execs_done, trim_execs, "     /* afl-eval */
-                     "calib_execs, hang_execs, sync_execs, "
-                     "trace_execs, trace_queued, trace_tmouts, trace_nnb\n"); 
+                     "calib_execs, hang_execs, trace_execs, sync_execs, "
+                     "total_traced, oracle_intrpts, oracle_crashes, "
+                     "trace_tmouts, trace_nnbits, trace_crashes, "
+                     "total_queued, queued_intrpt, queued_jmpmis\n"); 
                      /* ignore errors */
-
 }
 
 
@@ -8119,23 +8126,18 @@ int main(int argc, char** argv) {
         use_splicing = 1;
         break;
 
-      case 'B': /* load bitmap */
+      case 'B': /* load block map */
 
-        /* This is a secret undocumented option! It is useful if you find
-           an interesting test case during a normal fuzzing process, and want
-           to mutate it without rediscovering any of the test cases already
-           found during an earlier run.
+        /* Use if zuntracer-mapper.py generated mapping done prior
+           to running zuntracer-afl. Requires Zipr dirs for oracle
+           and tracer binaries. */
 
-           To use this mode, you need to point -B to the fuzz_bitmap produced
-           by an earlier run for the exact same binary... and that's it.
+        if (in_bbmap) FATAL("Multiple -B options not supported");
+        if (!oracle_zipr_dir || !tracer_zipr_dir) 
+          FATAL("Using -B requires oracle (-O) and tracer (-T) Zipr dirs");
 
-           I only used this once or twice to get variants of a particular
-           file, so I'm not making this an official setting. */
+        in_bbmap = optarg;
 
-        if (in_bitmap) FATAL("Multiple -B options not supported");
-
-        in_bitmap = optarg;
-        read_bitmap(in_bitmap);
         break;
 
       case 'W': /* banner */
@@ -8227,8 +8229,9 @@ int main(int argc, char** argv) {
 
   ACTF("Setting up tracer binary...");
   setup_tracer();
-
-  ACTF("Setting up basic block array...");
+  
+  if (in_bbmap) ACTF("Using user-provided basic block array...");
+  else ACTF("Setting up basic block array...");
   setup_block_maps(); 
 
   ACTF("Modifying oracle binary...");

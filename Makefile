@@ -22,7 +22,7 @@ HELPER_PATH = $(PREFIX)/lib/afl
 DOC_PATH    = $(PREFIX)/share/doc/afl
 MISC_PATH   = $(PREFIX)/share/afl
 
-PROGS       = zuntracer-afl afl-showmap afl-tmin afl-gotcpu afl-analyze
+PROGS       = zuntracer-afl zuntracer-mapper afl-showmap afl-tmin afl-gotcpu afl-analyze
 SH_PROGS    = afl-plot afl-cmin afl-whatsup
 
 CFLAGS     ?= -O3 -funroll-loops
@@ -41,6 +41,9 @@ all: $(PROGS) all_done
 
 zuntracer-afl: zuntracer-afl.c $(COMM_HDR) 
 	$(CC) $(CFLAGS) $@.c -o $@ $(LDFLAGS)
+
+zuntracer-mapper: zuntracer-mapper.py
+	chmod 755 zuntracer-mapper.py
 
 afl-showmap: afl-showmap.c $(COMM_HDR) 
 	$(CC) $(CFLAGS) $@.c -o $@ $(LDFLAGS)

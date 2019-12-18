@@ -2663,12 +2663,12 @@ static u8 run_target(s32 * child_pid, s32 * fsrv_ctl_fd, s32 * fsrv_st_fd, u32 t
       exit(0);
     }
   }
+  
+  /* Runs either binary on current testcase, and report back exit code. */
 
+  int status;
+  static int prev_timed_out = 0;
   static struct itimerval it;
-  static u32 prev_timed_out = 0;
-
-  int status = 0;
-
   child_timed_out = 0;
 
   /* After this memset, trace_bits[] are effectively volatile, so we
@@ -2678,48 +2678,47 @@ static u8 run_target(s32 * child_pid, s32 * fsrv_ctl_fd, s32 * fsrv_st_fd, u32 t
   memset(trace_bits, 0, MAP_SIZE);
   MEM_BARRIER();
 
-  s32 res;
+  /* Forkserver is up, so tell it to have at it (control pipe), then read back PID. 
+   * A message length of 4 indicates successful communication with the forkserver. */
 
-  /* In non-dumb mode, we have the fork server up and running, so simply
-     tell it to have at it, and then read back PID. */
-
-  if ((res = write(*fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
-
+  if (write(*fsrv_ctl_fd, &prev_timed_out, 4) != 4) {
     if (stop_soon) return 0;
-    RPFATAL(res, "Unable to request new process from fork server (OOM?)");
-
+    FATAL("Unable to request new process from fork server (OOM?)");
   }
 
-  if ((res = read(*fsrv_st_fd, &child_pid, 4)) != 4) {
+  /* Read status message and check message length. */
 
+  if (read(*fsrv_st_fd, child_pid, 4) != 4) {
     if (stop_soon) return 0;
-    RPFATAL(res, "Unable to request new process from fork server (OOM?)");
-
+    FATAL("Unable to request new process from fork server (OOM?)");
   }
 
-  if (child_pid <= 0) FATAL("Fork server is misbehaving (OOM?)");
+  /* Verify child PID isn't corrupt or active. */
 
-  /* Configure timeout, as requested by user, then wait for child to terminate. */
+  if (*child_pid <= 0) {
+    if (stop_soon) return 0;
+    FATAL("Fork server is misbehaving (OOM?)");
+  }
+
+  /* Configure timer. */
 
   it.it_value.tv_sec = (timeout / 1000);
   it.it_value.tv_usec = (timeout % 1000) * 1000;
-
   setitimer(ITIMER_REAL, &it, NULL);
 
-  /* The SIGALRM handler simply kills the child_pid and sets child_timed_out. */
+  /* Read and check message length. */
 
-  if ((res = read(*fsrv_st_fd, &status, 4)) != 4) {
-
-    if (stop_soon) return 0;
-    RPFATAL(res, "Unable to communicate with fork server (OOM?)");
-
+  if (read(*fsrv_st_fd, &status, 4) != 4) {
+    FATAL("Unable to communicate with fork server (OOM?)");
   }
 
-  if (!WIFSTOPPED(status)) child_pid = 0;
+  if (!WIFSTOPPED(status)) 
+    *child_pid = 0;
+
+  /* Deactivate timer. */
 
   it.it_value.tv_sec = 0;
   it.it_value.tv_usec = 0;
-
   setitimer(ITIMER_REAL, &it, NULL);
 
   total_execs++;
@@ -2745,15 +2744,14 @@ static u8 run_target(s32 * child_pid, s32 * fsrv_ctl_fd, s32 * fsrv_st_fd, u32 t
     kill_signal = WTERMSIG(status);
 
     /* We process all timeout-producing testcases (including SIGTRAPs) as timeouts. */
-    
+
     if (child_timed_out && (kill_signal == SIGKILL || kill_signal == SIGTRAP)) return FAULT_TMOUT; 
    
-    /* Catches ZUnTracer-AFL's oracle interrupt */
-    
+    /* Catches UnTracer-AFL's oracle interrupt */
+
     if (kill_signal == SIGTRAP) return FAULT_TRAP; 
 
     return FAULT_CRASH;
-
   }
 
   return FAULT_NONE;

@@ -464,9 +464,9 @@ def main():
 		outLogFile
 
 	usage = "\n\tUsage: " \
-		"\tzuntracer-mapper.py \
-		[/path/to/oracle/Zipr/dir] [/path/to/tracer/Zipr/dir] \
-		[/path/to/outmap], [/path/to/maplog]\n"
+		"\tzuntracer-mapper.py " \
+		"[/path/to/oracle/Zipr/dir] [/path/to/tracer/Zipr/dir] " \
+		"[/path/to/outmap] [/path/to/maplog]\n"
 
 	# Get args and open file handlers.
 

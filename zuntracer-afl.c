@@ -661,7 +661,7 @@ void modify_oracle(u8 * path_to_oracle){
         }        
 
         ptr = strtok(NULL, delim);
-        num_bytes++; // Adjusts the current address based on mod length.
+        num_bytes++; 
       }
     }
   }
@@ -679,7 +679,7 @@ void modify_oracle(u8 * path_to_oracle){
 
 int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){ 
 
-  int offset_target, offset_oracle, mod_len;
+  int offset, mod_len;
   int count = 0;
   char unmod_bytes[10];
 
@@ -701,16 +701,15 @@ int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){
     /* Pull mapped block addresses and modification byte length. */
 
     mod_len = bbmap_modl[i];
-    offset_target = bbmap_addr[i];   
-    offset_oracle = offset_target;
+    offset = bbmap_addr[i];   
 
     /* Seek to position and read/reset mod_len # of bytes. 
        In contrast to the related operation in modify_oracle(), 
        this doesn't read/write byte-by-byte; it treats it as a 
        mod_len-sized chunk and does it all at once. */
 
-    fseek(virgin_file, offset_target, SEEK_SET);
-    fseek(oracle_file, offset_oracle, SEEK_SET);
+    fseek(virgin_file, offset, SEEK_SET);
+    fseek(oracle_file, offset, SEEK_SET);
       
     if (fread(unmod_bytes, mod_len, 1, virgin_file) != 1){
       perror("fread() unmodify_oracle()");
@@ -2990,6 +2989,11 @@ static void check_map_coverage(void) {
    expected. This is done only for the initial inputs, and only once. */
 
 static void perform_dry_run() {
+
+  /* Some basic blocks are executed during tracer forkserver 
+   * init, so we need to be sure to unmodify those first. */
+
+  blocks_seen += unmodify_oracle(oracle_path, oracle_cov);
 
   struct queue_entry* q = queue;
   u32 cal_failures = 0;
@@ -7397,10 +7401,11 @@ static void usage(u8* argv0) {
 
   SAYF("\n%s [ options ] -- /path/to/fuzzed_app [ ... ]\n\n"
 
-       "If using pre-instrumented oracle/tracer (recommended):\n\n"
+       "If using pre-generated oracle/tracer binaries (optional but recommended):\n\n"
        
-       "  -O dir        - zipr working dir for oracle\n"
-       "  -T dir        - zipr working dir for tracer\n\n"
+       "  -O dir        - Zipr working dir for oracle (required)\n"
+       "  -T dir        - Zipr working dir for tracer (required)\n"
+       "  -M file       - zuntracer-mapper.py output block map (optional)\n\n"
 
        "afl-eval parameters:\n\n" /* afl-eval */
 

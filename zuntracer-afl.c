@@ -149,14 +149,12 @@ EXP_ST u8  skip_deterministic,        /* Skip deterministic stages?       */
            not_on_tty,                /* stdout is not a tty              */
            term_too_small,            /* terminal dimensions too small    */
            uses_asan,                 /* Target uses ASAN?                */
-           no_forkserver,             /* Disable forkserver?              */
            in_place_resume,           /* Attempt in-place resume?         */
            auto_changed,              /* Auto-generated tokens changed?   */
            no_cpu_meter_red,          /* Feng shui on the status screen   */
            no_arith,                  /* Skip most arithmetic ops         */
            shuffle_queue,             /* Shuffle input queue?             */
            bitmap_changed = 1,        /* Time to update bitmap?           */
-           qemu_mode,                 /* Running in QEMU mode?            */
            skip_requested,            /* Skip request, via SIGUSR1        */
            run_over10m,               /* Run time over 10 minutes?        */
            persistent_mode,           /* Running in persistent mode?      */
@@ -2643,8 +2641,6 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
 
 static void show_stats(void);
 
-//static void maybe_update_plot_file(double bitmap_cvg, double eps);
-
 
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
@@ -3753,9 +3749,7 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps) {
              queue_cycle ? (queue_cycle - 1) : 0, 
 
              norm_execs, total_execs, trim_execs, calib_execs, hang_execs, trace_execs, sync_execs, /* afl-eval */ 
-             //trace_execs, trace_queued, trace_tmouts, trace_nnbits,
-             trace_execs, oracle_intrpts, oracle_crashes, 
-             trace_tmouts, trace_nnbits, total_crashes,
+             trace_execs, oracle_intrpts, oracle_crashes, trace_tmouts, trace_nnbits, total_crashes,
              trace_queued, queued_intrpt, queued_jmpmis,
 
              eps, queued_paths, queued_favored, queued_discovered, queued_imported,
@@ -3828,7 +3822,6 @@ static void maybe_update_plot_file(double bitmap_cvg, double eps) {
   fflush(plot_file);
 
 }
-
 
 
 /* A helper function for maybe_delete_out_dir(), deleting all prefixed
@@ -4222,6 +4215,7 @@ static void show_stats(void) {
   cur_ms = get_cur_time();
 
   /* If past max_execs update plot file. */ /* afl-eval */
+
   if (past_max_execs) { 
     last_plot_ms = cur_ms;
     t_bytes = count_non_255_bytes(virgin_bits);
@@ -4724,7 +4718,7 @@ static void show_init_stats(void) {
 
   SAYF("\n");
 
-  if (avg_us > (qemu_mode ? 50000 : 10000)) 
+  if (avg_us > (10000)) 
     WARNF(cLRD "The target binary is pretty slow! See %s/perf_tips.txt.",
           doc_path);
 
@@ -7278,18 +7272,6 @@ EXP_ST void check_binary(u8* fname) {
 
   }
 
-  if (qemu_mode &&
-      memmem(f_data, f_len, SHM_ENV_VAR, strlen(SHM_ENV_VAR) + 1)) {
-
-    SAYF("\n" cLRD "[-] " cRST
-         "This program appears to be instrumented with afl-gcc, but is being run in\n"
-         "    QEMU mode (-Q). This is probably not what you want - this setup will be\n"
-         "    slow and offer no practical benefits.\n");
-
-    FATAL("Instrumentation found in -Q mode");
-
-  }
-
   if (memmem(f_data, f_len, "libasan.so", 10) ||
       memmem(f_data, f_len, "__msan_init", 11)) uses_asan = 1;
 
@@ -7405,7 +7387,7 @@ static void usage(u8* argv0) {
        
        "  -O dir        - Zipr working dir for oracle (required)\n"
        "  -T dir        - Zipr working dir for tracer (required)\n"
-       "  -M file       - zuntracer-mapper.py output block map (optional)\n\n"
+       "  -B file       - zuntracer-mapper.py output block map (optional)\n\n"
 
        "afl-eval parameters:\n\n" /* afl-eval */
 
@@ -8171,7 +8153,6 @@ int main(int argc, char** argv) {
   if (!strcmp(in_dir, out_dir))
     FATAL("Input and output directories can't be the same");
 
-  if (getenv("AFL_NO_FORKSRV"))    no_forkserver    = 1;
   if (getenv("AFL_NO_CPU_RED"))    no_cpu_meter_red = 1;
   if (getenv("AFL_NO_ARITH"))      no_arith         = 1;
   if (getenv("AFL_SHUFFLE_QUEUE")) shuffle_queue    = 1;

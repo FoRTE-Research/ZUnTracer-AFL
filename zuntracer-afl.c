@@ -653,7 +653,7 @@ void modify_oracle(){
         int offset = addr + num_bytes;
 
         if (fseek(oracle_file, addr + num_bytes, SEEK_SET) != 0)
-          PFATAL("Unable to fseek file '%s' at offset %i", oracle_path, offset);
+          PFATAL("Unable to seek file '%s' at offset %i", oracle_path, offset);
 
         if (fwrite(&byte, 1, 1, oracle_file) != 1)
           PFATAL("Unable to write file '%s'", oracle_path);   
@@ -711,10 +711,10 @@ int unmodify_oracle(int blocks_cov[]){
        mod_len-sized chunk and does it all at once. */
 
     if (fseek(virgin_file, offset, SEEK_SET) != 0)
-      PFATAL("Unable to fseek file '%s' at offset '%i", virgin_path, offset);
+      PFATAL("Unable to seek file '%s' at offset '%i", virgin_path, offset);
 
     if (fseek(oracle_file, offset, SEEK_SET) != 0)
-      PFATAL("Unable to fseek file '%s' at offset '%i", oracle_path, offset);   
+      PFATAL("Unable to seek file '%s' at offset '%i", oracle_path, offset);   
 
     if (fread(unmod_bytes, mod_len, 1, virgin_file) != 1)
       PFATAL("Unable to read file '%s'", virgin_path);
@@ -2397,11 +2397,13 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
   int status;
   s32 rlen;
 
-  if (pipe(st_pipe) || pipe(ctl_pipe)) PFATAL("pipe() failed");
+  if (pipe(st_pipe) || pipe(ctl_pipe)) 
+    PFATAL("pipe() failed for file '%s'", fsrv_argv[0]);
 
   *fork_pid = fork();
 
-  if (*fork_pid < 0) PFATAL("fork() failed");
+  if (*fork_pid < 0) 
+    PFATAL("fork() failed for file '%s'", fsrv_argv[0]);
 
   if (!*fork_pid) {
 
@@ -2449,7 +2451,6 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
        specified, stdin is /dev/null; otherwise, out_fd is cloned instead. */
 
     setsid();
-
     dup2(dev_null_fd, 1);
     dup2(dev_null_fd, 2);
 
@@ -2466,8 +2467,10 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
 
     /* Set up control and status pipes, close the unneeded original fds. */
 
-    if (dup2(ctl_pipe[0], FORKSRV_FD) < 0) PFATAL("dup2() failed");
-    if (dup2(st_pipe[1], FORKSRV_FD + 1) < 0) PFATAL("dup2() failed");
+    if (dup2(ctl_pipe[0], FORKSRV_FD) < 0) 
+      PFATAL("dup2() failed for file '%s'", fsrv_argv[0]);
+    if (dup2(st_pipe[1], FORKSRV_FD + 1) < 0) 
+      PFATAL("dup2() failed for file '%s'", fsrv_argv[0]);
 
     close(ctl_pipe[0]);
     close(ctl_pipe[1]);
@@ -2485,7 +2488,7 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
     if (!getenv("LD_BIND_LAZY")) setenv("LD_BIND_NOW", "1", 0);
 
     if (execv(fsrv_argv[0], fsrv_argv) < 0)
-      PFATAL("execv() failed on '%s'", fsrv_argv[0]);
+      PFATAL("execv() failed for file '%s'", fsrv_argv[0]);
 
     /* Use a distinctive bitmap signature to tell the parent about execv()
        falling through. */
@@ -2525,37 +2528,38 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
   }
 
   if (child_timed_out)
-    FATAL("Timeout while initializing fork server (adjusting -t may help)");
+    FATAL("Timeout while initializing fork server for file '%s' (adjusting -t may help)", \
+      fsrv_argv[0]);
 
   if (waitpid(*fork_pid, &status, 0) <= 0)
-    PFATAL("waitpid() failed");
+    PFATAL("waitpid() failed for file '%s'", fsrv_argv[0]);
 
   if (WIFSIGNALED(status)) {
 
     if (mem_limit && mem_limit < 500 && uses_asan) {
 
       SAYF("\n" cLRD "[-] " cRST
-           "Whoops, the target binary crashed suddenly, before receiving any input\n"
+           "Whoops, the binary '%s' crashed suddenly, before receiving any input\n"
            "    from the fuzzer! Since it seems to be built with ASAN and you have a\n"
            "    restrictive memory limit configured, this is expected; please read\n"
-           "    %s/notes_for_asan.txt for help.\n", doc_path);
+           "    %s/notes_for_asan.txt for help.\n", fsrv_argv[0], doc_path);
 
     } else if (!mem_limit) {
 
       SAYF("\n" cLRD "[-] " cRST
-           "Whoops, the target binary crashed suddenly, before receiving any input\n"
+           "Whoops, the binary '%s' crashed suddenly, before receiving any input\n"
            "    from the fuzzer! There are several probable explanations:\n\n"
 
            "    - The binary is just buggy and explodes entirely on its own. If so, you\n"
            "      need to fix the underlying problem or find a better replacement.\n\n"
 
            "    - Less likely, there is a horrible bug in the fuzzer. If other options\n"
-           "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n");
+           "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n", fsrv_argv[0]);
 
     } else {
 
       SAYF("\n" cLRD "[-] " cRST
-           "Whoops, the target binary crashed suddenly, before receiving any input\n"
+           "Whoops, the binary '%s' crashed suddenly, before receiving any input\n"
            "    from the fuzzer! There are several probable explanations:\n\n"
 
            "    - The current memory limit (%s) is too restrictive, causing the\n"
@@ -2577,36 +2581,36 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
 
            "    - Less likely, there is a horrible bug in the fuzzer. If other options\n"
            "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n",
-           DMS(mem_limit << 20), mem_limit - 1);
+           fsrv_argv[0], DMS(mem_limit << 20), mem_limit - 1);
 
     }
 
-    FATAL("Fork server crashed with signal %d", WTERMSIG(status));
+    FATAL("Fork server for file '%s' crashed with signal %d", fsrv_argv[0], WTERMSIG(status));
 
   }
 
   if (*(u32*)trace_bits == EXEC_FAIL_SIG)
-    FATAL("Unable to execute target application ('%s')", target_argv[0]);
+    FATAL("Unable to execute target application ('%s')", fsrv_argv[0]);
 
   if (mem_limit && mem_limit < 500 && uses_asan) {
 
     SAYF("\n" cLRD "[-] " cRST
-           "Hmm, looks like the target binary terminated before we could complete a\n"
+           "Hmm, looks like the binary '%s' terminated before we could complete a\n"
            "    handshake with the injected code. Since it seems to be built with ASAN and\n"
            "    you have a restrictive memory limit configured, this is expected; please\n"
-           "    read %s/notes_for_asan.txt for help.\n", doc_path);
+           "    read %s/notes_for_asan.txt for help.\n", fsrv_argv[0], doc_path);
 
   } else if (!mem_limit) {
 
     SAYF("\n" cLRD "[-] " cRST
-         "Hmm, looks like the target binary terminated before we could complete a\n"
+         "Hmm, looks like the binary '%s' terminated before we could complete a\n"
          "    handshake with the injected code. Perhaps there is a horrible bug in the\n"
-         "    fuzzer. Poke <lcamtuf@coredump.cx> for troubleshooting tips.\n");
+         "    fuzzer. Poke <lcamtuf@coredump.cx> for troubleshooting tips.\n", fsrv_argv[0]);
 
   } else {
 
     SAYF("\n" cLRD "[-] " cRST
-         "Hmm, looks like the target binary terminated before we could complete a\n"
+         "Hmm, looks like the binary '%s' terminated before we could complete a\n"
          "    handshake with the injected code. There are %s probable explanations:\n\n"
 
          "%s"
@@ -2629,7 +2633,7 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
          getenv(DEFER_ENV_VAR) ?
          "    - You are using deferred forkserver, but __AFL_INIT() is never\n"
          "      reached before the program terminates.\n\n" : "",
-         DMS(mem_limit << 20), mem_limit - 1);
+         fsrv_argv[0], DMS(mem_limit << 20), mem_limit - 1);
 
   }
 

@@ -113,9 +113,9 @@ EXP_ST s32 oracle_fsrv_ctl_fd,        /* Forkserver control pipes         */
            tracer_child_pid;
 
 EXP_ST u8 *target_path,               /* Path to target binary            */
-          *oracle_path,               /* Path to oracle binary            */    
+          *oracle_path,               /* Path to oracle binary            */ 
+          *virgin_path,               /* Path to virgin oracle binary     */
           *tracer_path,               /* Path to tracer binary            */
-          *bbmap_path,                /* Path to basic block list         */ 
           *in_bbmap,                  /* Path to user-specified bbmap     */
           *oracle_zipr_dir,           /* Oracle zipr directory            */
           *tracer_zipr_dir;           /* Tracer zipr directory            */
@@ -371,7 +371,6 @@ enum {
 
 void execute(char * tmp[], char * pid_name, int print_output){
 
-  
   int pid_fork, status;
 
   pid_fork = fork();
@@ -402,27 +401,31 @@ void execute(char * tmp[], char * pid_name, int print_output){
 void copy_file(char* src_path, char* dst_path, int set_chmod){
 
   struct stat st = {0};
-  stat(src_path, &st);
+  if (stat(src_path, &st) < 0)
+    PFATAL("copy_file() stat() failed on '%s'", src_path);
+
   char * data = malloc(st.st_size);
 
   FILE * src_file = fopen(src_path, "rb");
+  if (src_file < 0)
+    PFATAL("Unable to open file '%s'", src_path);
+
   FILE * dst_file = fopen(dst_path, "wb");
+  if (dst_file < 0)
+    PFATAL("Unable to open file '%s'", dst_path);
 
-  if (fread(data, 1, st.st_size, src_file) != st.st_size) {
-    perror("fread in copy_file()");
-    exit(EXIT_FAILURE);
-  }
+  if (fread(data, 1, st.st_size, src_file) != st.st_size) 
+    PFATAL("Unable to read file '%s'", src_path);
 
-  if(fwrite(data, 1, st.st_size, dst_file) != st.st_size) {
-    perror("fwrite in copy_file()");
-    exit(EXIT_FAILURE);
-  }
+  if(fwrite(data, 1, st.st_size, dst_file) != st.st_size) 
+    PFATAL("Unable to write file '%s'", dst_path);
 
   fclose(src_file);
   fclose(dst_file);
 
   if (set_chmod > 0)
-    chmod(dst_path, set_chmod);
+    if (chmod(dst_path, set_chmod) < 0)
+      PFATAL("Cannot chmod() '%i' on file '%s'", set_chmod, dst_path);
   
   return;
 }
@@ -476,9 +479,14 @@ void setup_oracle(){
   /* Otherwise, copy it over from the user-supplied Zipr dir. */
 
   else{
-    char * tmp2 = alloc_printf("%s/c.out", oracle_zipr_dir);
-    copy_file(tmp2, oracle_path, 0777);
+    char * tmp = alloc_printf("%s/c.out", oracle_zipr_dir);
+    copy_file(tmp, oracle_path, 0777);
+    ck_free(tmp);
   }
+
+  /* Set up virgin oracle path - this is the unmodified oracle binary. */
+
+  virgin_path = alloc_printf("%s/c.out", oracle_zipr_dir);   
 
   return;
 }
@@ -499,8 +507,9 @@ void setup_tracer(){
   /* Otherwise, copy it over from the user-supplied Zipr dir. */
 
   else{
-    char * tmp2 = alloc_printf("%s/c.out", tracer_zipr_dir);
-    copy_file(tmp2, tracer_path, 0777);
+    char * tmp = alloc_printf("%s/c.out", tracer_zipr_dir);
+    copy_file(tmp, tracer_path, 0777);
+    ck_free(tmp);
   }
 
   return;
@@ -527,12 +536,13 @@ void setup_block_maps(){
   /* If bbmap not passed in (-B), we need to generate it.
      Otherwise, just copy it to our fuzzing out dir. */
 
-  bbmap_path = alloc_printf("%s/bbmap", out_dir);  
+  char * bbmap_path = alloc_printf("%s/bbmap", out_dir);  
 
   if (!in_bbmap){
     char * log_path  = alloc_printf("%s/bbmap.log", out_dir);
     char * map_args[] = {"zuntracer-mapper.py", oracle_zipr_dir, tracer_zipr_dir, bbmap_path, log_path, NULL};
     execute(map_args, "zuntracer-mapper.py", 1);  
+    ck_free(log_path);
   }
 
   else{
@@ -542,17 +552,13 @@ void setup_block_maps(){
   /* Reads a list of basic blocks from file and populates a new array. */
 
   FILE * bbmap_file = fopen(bbmap_path, "r");
-  if (bbmap_file == NULL){
-    perror("fopen() bbmap_path");
-    exit(EXIT_FAILURE);   
-  }
+  if (bbmap_file < 0)
+    PFATAL("Unable to open file '%s'", bbmap_path);
 
   /* Discard header row. */
 
-  if (fscanf(bbmap_file, "%*[^\n]") < 0){
-    perror("fscanf() bbmap_path header");
-    exit(EXIT_FAILURE);
-  }  
+  if (fscanf(bbmap_file, "%*[^\n]") < 0)
+    PFATAL("fscanf() failed on file '%s'", bbmap_path);
 
   /* Read and map block attr's, discarding those we don't care about. */
 
@@ -566,7 +572,6 @@ void setup_block_maps(){
     /* Update block address and modification length maps. */
 
     addr = get_base_addr(addr_raw);
-
     bbmap_addr[bbid] = addr;
     bbmap_modl[bbid] = mod_len;
 
@@ -575,10 +580,9 @@ void setup_block_maps(){
 
     /* Update block modification bytes map. */
 
-    if ((bbmap_modb[bbid] = malloc(sizeof(char) * 50)) == NULL) {
-      perror("malloc() bbmap_modb");
-      exit(EXIT_FAILURE);
-    }
+    if ((bbmap_modb[bbid] = malloc(sizeof(char) * 50)) == NULL)
+      PFATAL("bbmap allocation error");
+
     strcpy(bbmap_modb[bbid], mod_bytes);
     blocks_total++;
 
@@ -594,6 +598,7 @@ void setup_block_maps(){
   }
 
   fclose(bbmap_file);
+  ck_free(bbmap_path);
 
   return;
 }
@@ -607,18 +612,16 @@ void setup_block_maps(){
   The latter three categories are mapped in an array for easy indexing in
   subsequent in-fuzzing unmodification. */
 
-void modify_oracle(u8 * path_to_oracle){
+void modify_oracle(){
 
   int addr, num_bytes;
   char delim[] = " ";
 
   /* Open both target oracle and bb list files. */
 
-  FILE * oracle_file = fopen(path_to_oracle, "r+");
-  if (oracle_file == NULL){
-    perror("fopen() modify_oracle()");
-    exit(EXIT_FAILURE);
-  } 
+  FILE * oracle_file = fopen(oracle_path, "r+");
+  if (oracle_file < 0)
+    PFATAL("Unable to open file '%s'", oracle_path);
 
   /* 0th map entry is always null, as is anything past total blocks. */
 
@@ -648,15 +651,11 @@ void modify_oracle(u8 * path_to_oracle){
 
         char byte = (char)strtol(ptr, NULL, 16);
 
-        if (fseek(oracle_file, addr + num_bytes, SEEK_SET) != 0){
-          perror("seek() modify_oracle()");
-          exit(EXIT_FAILURE);
-        }
+        if (fseek(oracle_file, addr + num_bytes, SEEK_SET) != 0)
+          PFATAL("Unable to fseek file '%s'", oracle_path);
 
-        if (fwrite(&byte, 1, 1, oracle_file) != 1){
-          perror("fwrite() modify_oracle()");
-          exit(EXIT_FAILURE);
-        }        
+        if (fwrite(&byte, 1, 1, oracle_file) != 1)
+          PFATAL("Unable to write file '%s'", oracle_path);   
 
         ptr = strtok(NULL, delim);
         num_bytes++; 
@@ -675,7 +674,7 @@ void modify_oracle(u8 * path_to_oracle){
    generated in modify_oracle(). To prevent redundant unmodifying of basic blocks, we 
    track unmodified basic blocks and only consider those not already seen. */
 
-int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){ 
+int unmodify_oracle(int blocks_cov[]){ 
 
   int offset, mod_len;
   int count = 0;
@@ -683,9 +682,13 @@ int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){
 
   /* Open both target, target oracle, and trace files. */
 
-  char * virgin_path = alloc_printf("%s/c.out", oracle_zipr_dir);
   FILE * virgin_file = fopen(virgin_path, "r+");
-  FILE * oracle_file = fopen(path_to_oracle, "r+");
+  if (virgin_file < 0)
+    PFATAL("Unable to open '%s'", virgin_path);
+
+  FILE * oracle_file = fopen(oracle_path, "r+");
+  if (oracle_file < 0)
+    PFATAL("Unable to open '%s'", oracle_path);
 
   /* Iterate through basic blocks and "reset" its specified number of bytes. */
 
@@ -709,15 +712,11 @@ int unmodify_oracle(u8 * path_to_oracle, int blocks_cov[]){
     fseek(virgin_file, offset, SEEK_SET);
     fseek(oracle_file, offset, SEEK_SET);
       
-    if (fread(unmod_bytes, mod_len, 1, virgin_file) != 1){
-      perror("fread() unmodify_oracle()");
-      exit(EXIT_FAILURE);   
-    }
+    if (fread(unmod_bytes, mod_len, 1, virgin_file) != 1)
+      PFATAL("Unable to read file '%s'", virgin_path);
 
-    if (fwrite(unmod_bytes, mod_len, 1, oracle_file) != 1){
-      perror("fwrite() unmodify_oracle()");
-      exit(EXIT_FAILURE);
-    }
+    if (fwrite(unmod_bytes, mod_len, 1, oracle_file) != 1)
+      PFATAL("Unable to write file '%s'", oracle_path);
 
     blocks_cov[i] = 1;
     count++;
@@ -2366,10 +2365,8 @@ void stop_forkserver(int * fork_pid, int * fsrv_ctl_fd, int * fsrv_st_fd){
   /* Instead of telling the target binary forkserver to run another iteration,
      tell it to die. */
 
-  if (write(*fsrv_ctl_fd, &status, 2) != 2) {
-    perror("write() stop command failed");
-    exit(EXIT_FAILURE);
-  }
+  if (write(*fsrv_ctl_fd, &status, 2) != 2) 
+    PFATAL("Forkserver-stop write() failed");
 
   /* Close open ends of pipe. */
 
@@ -2378,10 +2375,8 @@ void stop_forkserver(int * fork_pid, int * fsrv_ctl_fd, int * fsrv_st_fd){
 
   /* Make sure the process dies. */
 
-  if (waitpid(*fork_pid, &status, 0) <= 0) {
-    perror("waitpid() for target to stop failed");
-    exit(EXIT_FAILURE);
-  }
+  if (waitpid(*fork_pid, &status, 0) <= 0)
+    PFATAL("Forkserver-stop waitpid() failed");
 }
 
 /* Spin up fork server (instrumented mode only). The idea is explained here:
@@ -2487,7 +2482,7 @@ EXP_ST void init_forkserver(s32 *fork_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, ch
     if (!getenv("LD_BIND_LAZY")) setenv("LD_BIND_NOW", "1", 0);
 
     if (execv(fsrv_argv[0], fsrv_argv) < 0)
-      perror("execv() forkserver");
+      PFATAL("execv() failed on '%s'", fsrv_argv[0]);
 
     /* Use a distinctive bitmap signature to tell the parent about execv()
        falling through. */
@@ -2704,6 +2699,7 @@ static u8 run_target(s32 * child_pid, s32 * fsrv_ctl_fd, s32 * fsrv_st_fd, u32 t
   /* Read and check message length. */
 
   if (read(*fsrv_st_fd, &status, 4) != 4) {
+    if (stop_soon) return 0;
     FATAL("Unable to communicate with fork server (OOM?)");
   }
 
@@ -2989,7 +2985,7 @@ static void perform_dry_run() {
   /* Some basic blocks are executed during tracer forkserver 
    * init, so we need to be sure to unmodify those first. */
 
-  blocks_seen += unmodify_oracle(oracle_path, oracle_cov);
+  blocks_seen += unmodify_oracle(oracle_cov);
 
   struct queue_entry* q = queue;
   u32 cal_failures = 0;
@@ -3020,7 +3016,7 @@ static void perform_dry_run() {
 
     /* Since calibration does tracing we must unmodify seen blocks in the oracle. */
 
-    blocks_seen += unmodify_oracle(oracle_path, oracle_cov);
+    blocks_seen += unmodify_oracle(oracle_cov);
 
     if (stop_soon) return;
 
@@ -3452,7 +3448,7 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
     /* Stop the oracle, modify it, and restart it; identify whether or not new blocks were reached. */
 
     stop_forkserver(&oracle_fsrv_pid, &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd);
-    blocks_seen += unmodify_oracle(oracle_path, oracle_cov);
+    blocks_seen += unmodify_oracle(oracle_cov);
     init_forkserver(&oracle_fsrv_pid, &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd, oracle_argv);
 
 #ifndef SIMPLE_FILES
@@ -8117,7 +8113,9 @@ int main(int argc, char** argv) {
            to running zuntracer-afl. Requires Zipr dirs for oracle
            and tracer binaries. */
 
-        if (in_bbmap) FATAL("Multiple -B options not supported");
+        if (in_bbmap) 
+          FATAL("Multiple -B options not supported");
+        
         if (!oracle_zipr_dir || !tracer_zipr_dir) 
           FATAL("Using -B requires oracle (-O) and tracer (-T) Zipr dirs");
 
@@ -8335,8 +8333,10 @@ stop_fuzzing:
   destroy_queue();
   destroy_extras();
   ck_free(target_path);
+  ck_free(oracle_path);
+  ck_free(tracer_path);
   ck_free(sync_id);
-
+  
   alloc_report();
 
   OKF("We're done here. Have a nice day!\n");

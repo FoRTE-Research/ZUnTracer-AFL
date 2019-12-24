@@ -407,11 +407,11 @@ void copy_file(char* src_path, char* dst_path, int set_chmod){
   char * data = malloc(st.st_size);
 
   FILE * src_file = fopen(src_path, "rb");
-  if (src_file < 0)
+  if (src_file == NULL)
     PFATAL("Unable to open file '%s'", src_path);
 
   FILE * dst_file = fopen(dst_path, "wb");
-  if (dst_file < 0)
+  if (dst_file == NULL)
     PFATAL("Unable to open file '%s'", dst_path);
 
   if (fread(data, 1, st.st_size, src_file) != st.st_size) 
@@ -552,7 +552,7 @@ void setup_block_maps(){
   /* Reads a list of basic blocks from file and populates a new array. */
 
   FILE * bbmap_file = fopen(bbmap_path, "r");
-  if (bbmap_file < 0)
+  if (bbmap_file == NULL)
     PFATAL("Unable to open file '%s'", bbmap_path);
 
   /* Discard header row. */
@@ -620,7 +620,7 @@ void modify_oracle(){
   /* Open both target oracle and bb list files. */
 
   FILE * oracle_file = fopen(oracle_path, "r+");
-  if (oracle_file < 0)
+  if (oracle_file == NULL)
     PFATAL("Unable to open file '%s'", oracle_path);
 
   /* 0th map entry is always null, as is anything past total blocks. */
@@ -684,11 +684,11 @@ int unmodify_oracle(int blocks_cov[]){
   /* Open both target, target oracle, and trace files. */
 
   FILE * virgin_file = fopen(virgin_path, "r+");
-  if (virgin_file < 0)
+  if (virgin_file == NULL)
     PFATAL("Unable to open '%s'", virgin_path);
 
   FILE * oracle_file = fopen(oracle_path, "r+");
-  if (oracle_file < 0)
+  if (oracle_file == NULL)
     PFATAL("Unable to open '%s'", oracle_path);
 
   /* Iterate through basic blocks and "reset" its specified number of bytes. */

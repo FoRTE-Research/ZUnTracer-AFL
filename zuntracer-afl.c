@@ -650,9 +650,10 @@ void modify_oracle(){
         /* Convert to byte for fwrite(), and write at block start. */
 
         char byte = (char)strtol(ptr, NULL, 16);
+        int offset = addr + num_bytes;
 
         if (fseek(oracle_file, addr + num_bytes, SEEK_SET) != 0)
-          PFATAL("Unable to fseek file '%s'", oracle_path);
+          PFATAL("Unable to fseek file '%s' at offset %i", oracle_path, offset);
 
         if (fwrite(&byte, 1, 1, oracle_file) != 1)
           PFATAL("Unable to write file '%s'", oracle_path);   
@@ -709,9 +710,12 @@ int unmodify_oracle(int blocks_cov[]){
        this doesn't read/write byte-by-byte; it treats it as a 
        mod_len-sized chunk and does it all at once. */
 
-    fseek(virgin_file, offset, SEEK_SET);
-    fseek(oracle_file, offset, SEEK_SET);
-      
+    if (fseek(virgin_file, offset, SEEK_SET) != 0)
+      PFATAL("Unable to fseek file '%s' at offset '%i", virgin_path, offset);
+
+    if (fseek(oracle_file, offset, SEEK_SET) != 0)
+      PFATAL("Unable to fseek file '%s' at offset '%i", oracle_path, offset);   
+
     if (fread(unmod_bytes, mod_len, 1, virgin_file) != 1)
       PFATAL("Unable to read file '%s'", virgin_path);
 

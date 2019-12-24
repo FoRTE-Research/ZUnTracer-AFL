@@ -2366,21 +2366,20 @@ void stop_forkserver(int * fork_pid, int * fsrv_ctl_fd, int * fsrv_st_fd){
 
   int status;
 
-  /* Instead of telling the target binary forkserver to run another iteration,
-     tell it to die. */
-
-  if (write(*fsrv_ctl_fd, &status, 2) != 2) 
-    PFATAL("Forkserver-stop write() failed");
-
   /* Close open ends of pipe. */
 
   close(*fsrv_ctl_fd);
   close(*fsrv_st_fd);
 
-  /* Make sure the process dies. */
+  /* Make sure the process dies. SIGTERM might be caught/ignored, 
+   * so let's use SIGKILL which guarantees the process dies. */
+
+  kill(*fork_pid, SIGKILL);
 
   if (waitpid(*fork_pid, &status, 0) <= 0)
     PFATAL("Forkserver-stop waitpid() failed");
+
+  return;
 }
 
 /* Spin up fork server (instrumented mode only). The idea is explained here:

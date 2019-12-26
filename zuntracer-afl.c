@@ -2362,7 +2362,7 @@ static void destroy_extras(void) {
 
 /*  Terminates either binary's forkserver. Used in CGT while unmodifying oracle. */
 
-void stop_forkserver(int * fork_pid, int * fsrv_ctl_fd, int * fsrv_st_fd){
+void stop_forkserver(int *fsrv_pid, int *child_pid, int *fsrv_ctl_fd, int *fsrv_st_fd){
 
   int status;
 
@@ -2374,10 +2374,17 @@ void stop_forkserver(int * fork_pid, int * fsrv_ctl_fd, int * fsrv_st_fd){
   /* Make sure the process dies. SIGTERM might be caught/ignored, 
    * so let's use SIGKILL which guarantees the process dies. */
 
-  kill(*fork_pid, SIGKILL);
+  if (*fsrv_pid > 0){
+    kill(*fsrv_pid, SIGKILL);
+    if (waitpid(*fsrv_pid, &status, 0) <= 0)
+      PFATAL("Forkserver-stop failed for fsrv!");
+  }
 
-  if (waitpid(*fork_pid, &status, 0) <= 0)
-    PFATAL("Forkserver-stop waitpid() failed");
+  if (*child_pid > 0){
+    kill(*child_pid, SIGKILL);
+    if (waitpid(*child_pid, &status, 0) <= 0)
+      PFATAL("Forkserver-stop failed for child!");
+  }
 
   return;
 }
@@ -3454,9 +3461,13 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     /* Stop the oracle, modify it, and restart it; identify whether or not new blocks were reached. */
 
-    stop_forkserver(&oracle_fsrv_pid, &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd);
+    stop_forkserver(&oracle_fsrv_pid, &oracle_child_pid, \
+      &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd);
+    
     blocks_seen += unmodify_oracle(oracle_cov);
-    init_forkserver(&oracle_fsrv_pid, &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd, oracle_argv);
+    
+    init_forkserver(&oracle_fsrv_pid, &oracle_fsrv_ctl_fd, \
+      &oracle_fsrv_st_fd, oracle_argv);
 
 #ifndef SIMPLE_FILES
 

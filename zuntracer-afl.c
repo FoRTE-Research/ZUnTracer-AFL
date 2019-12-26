@@ -669,7 +669,34 @@ void modify_oracle(){
   return;
 }
 
-void stop_forkserver(int *fsrv_pid, int *child_pid, int *fsrv_ctl_fd, int *fsrv_st_fd);
+
+/*  Terminates either binary's forkserver. Used in CGT while unmodifying oracle. */
+
+void stop_forkserver(int *fsrv_pid, int *child_pid, int *fsrv_ctl_fd, int *fsrv_st_fd){
+
+  int status;
+
+  /* Make sure the process dies. SIGTERM might be caught/ignored, 
+   * so let's use SIGKILL which guarantees the process dies. */
+
+  if (*fsrv_pid > 0){
+    kill(*fsrv_pid, SIGKILL);
+    waitpid(*fsrv_pid, &status, 0);
+  }
+
+  if (*child_pid > 0){
+    kill(*child_pid, SIGKILL);
+    waitpid(*child_pid, &status, 0);
+  }
+
+  /* Close open ends of pipe. */
+
+  close(*fsrv_ctl_fd);
+  close(*fsrv_st_fd);
+  
+  return;
+}
+
 
 /* Resets every basic block in the oracle binary copy back to its original values. 
    The number of bytes to reset at each basic block start are pulled from the mapping
@@ -696,7 +723,7 @@ int unmodify_oracle(int blocks_cov[]){
 
     stop_forkserver(&oracle_fsrv_pid, &oracle_child_pid, \
       &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd);
-    sleep(3);
+    sleep(5);
 
     oracle_file = fopen(oracle_path, "r+");
     if (oracle_file == NULL)
@@ -2371,33 +2398,6 @@ static void destroy_extras(void) {
 
 }
 
-
-/*  Terminates either binary's forkserver. Used in CGT while unmodifying oracle. */
-
-void stop_forkserver(int *fsrv_pid, int *child_pid, int *fsrv_ctl_fd, int *fsrv_st_fd){
-
-  int status;
-
-  /* Make sure the process dies. SIGTERM might be caught/ignored, 
-   * so let's use SIGKILL which guarantees the process dies. */
-
-  if (*fsrv_pid > 0){
-    kill(*fsrv_pid, SIGKILL);
-    waitpid(*fsrv_pid, &status, 0);
-  }
-
-  if (*child_pid > 0){
-    kill(*child_pid, SIGKILL);
-    waitpid(*child_pid, &status, 0);
-  }
-
-  /* Close open ends of pipe. */
-
-  close(*fsrv_ctl_fd);
-  close(*fsrv_st_fd);
-  
-  return;
-}
 
 /* Spin up fork server (instrumented mode only). The idea is explained here:
 

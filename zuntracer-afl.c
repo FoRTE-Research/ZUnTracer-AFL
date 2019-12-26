@@ -669,6 +669,7 @@ void modify_oracle(){
   return;
 }
 
+void stop_forkserver(int *fsrv_pid, int *child_pid, int *fsrv_ctl_fd, int *fsrv_st_fd);
 
 /* Resets every basic block in the oracle binary copy back to its original values. 
    The number of bytes to reset at each basic block start are pulled from the mapping
@@ -688,8 +689,19 @@ int unmodify_oracle(int blocks_cov[]){
     PFATAL("Unable to open '%s'", virgin_path);
 
   FILE * oracle_file = fopen(oracle_path, "r+");
-  if (oracle_file == NULL)
-    PFATAL("Unable to open '%s'", oracle_path);
+  if (oracle_file == NULL){
+
+    /* If we're here, likely means oracle hasn't terminated,
+     * so try to kill the forkserver again and wait a bit. */
+
+    stop_forkserver(&oracle_fsrv_pid, &oracle_child_pid, \
+      &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd);
+    sleep(3);
+
+    oracle_file = fopen(oracle_path, "r+");
+    if (oracle_file == NULL)
+      PFATAL("Unable to open '%s'", oracle_path);
+  }
 
   /* Iterate through basic blocks and "reset" its specified number of bytes. */
 
@@ -2366,26 +2378,24 @@ void stop_forkserver(int *fsrv_pid, int *child_pid, int *fsrv_ctl_fd, int *fsrv_
 
   int status;
 
-  /* Close open ends of pipe. */
-
-  close(*fsrv_ctl_fd);
-  close(*fsrv_st_fd);
-
   /* Make sure the process dies. SIGTERM might be caught/ignored, 
    * so let's use SIGKILL which guarantees the process dies. */
 
   if (*fsrv_pid > 0){
     kill(*fsrv_pid, SIGKILL);
-    if (waitpid(*fsrv_pid, &status, 0) <= 0)
-      PFATAL("Forkserver-stop failed for fsrv!");
+    waitpid(*fsrv_pid, &status, 0);
   }
 
   if (*child_pid > 0){
     kill(*child_pid, SIGKILL);
-    if (waitpid(*child_pid, &status, 0) <= 0)
-      PFATAL("Forkserver-stop failed for child!");
+    waitpid(*child_pid, &status, 0);
   }
 
+  /* Close open ends of pipe. */
+
+  close(*fsrv_ctl_fd);
+  close(*fsrv_st_fd);
+  
   return;
 }
 

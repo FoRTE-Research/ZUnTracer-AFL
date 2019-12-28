@@ -707,6 +707,7 @@ int unmodify_oracle(int blocks_cov[]){
 
   int offset, mod_len;
   int count = 0;
+  int fopen_iter = 0;
   char unmod_bytes[10];
 
   /* Open both target, target oracle, and trace files. */
@@ -715,19 +716,20 @@ int unmodify_oracle(int blocks_cov[]){
   if (virgin_file == NULL)
     PFATAL("Unable to open '%s'", virgin_path);
 
-  FILE * oracle_file = fopen(oracle_path, "r+");
-  if (oracle_file == NULL){
+  /* Opening the oracle may be tricky due to SIGKILL being 
+   * asynchronous; if fopen() fails, sleep one millisecond
+   * and then try again; exit in failure after 10 seconds. */
 
-    /* If we're here, likely means oracle hasn't terminated,
-     * so try to kill the forkserver again and wait a bit. */
+  FILE * oracle_file = fopen(oracle_path, "r+"); 
 
-    stop_forkserver(&oracle_fsrv_pid, &oracle_child_pid, \
-      &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd);
-    sleep(5);
-
+  while (oracle_file == NULL){
+    usleep(1000);
     oracle_file = fopen(oracle_path, "r+");
-    if (oracle_file == NULL)
+
+    if (fopen_iter > 10000000)
       PFATAL("Unable to open '%s'", oracle_path);
+    
+    fopen_iter++;
   }
 
   /* Iterate through basic blocks and "reset" its specified number of bytes. */
@@ -3473,7 +3475,7 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     stop_forkserver(&oracle_fsrv_pid, &oracle_child_pid, \
       &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd);
-    
+
     blocks_seen += unmodify_oracle(oracle_cov);
     
     init_forkserver(&oracle_fsrv_pid, &oracle_fsrv_ctl_fd, \

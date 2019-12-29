@@ -3459,11 +3459,33 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
       }
     }
 
-    /* Keep only if there are new bits in the map, add to queue for
-       future fuzzing, etc. */
+    /* If a test case hits an oracle interrupt but its tracing reveals no new bits, 
+     * we will not queue it. However, this may be a symptom of irregularities (e.g., 
+     * block mapping errors or target variable behavior), so we save the test case
+     * to help facilitate offline analysis. In general, traced_nnb should be very
+     * very low with respect to the total executions. */
 
     if (!(hnb = has_new_bits(virgin_bits))) {
       trace_nnbits++;
+
+#ifndef SIMPLE_FILES
+
+      fn = alloc_printf("%s/nnbits/id:%06u,%s", out_dir, (int) trace_nnbits,
+                      describe_op(hnb));
+
+#else
+
+      fn = alloc_printf("%s/nnbits/id_%06u", out_dir, (int) trace_nnbits);
+
+#endif /* ^!SIMPLE_FILES */
+
+      fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
+      if (fd < 0) PFATAL("Unable to create '%s'", fn);
+      ck_write(fd, mem, len, fn);
+      close(fd);
+
+      ck_free(fn);
+
       return 0;
     }    
 
@@ -3530,7 +3552,6 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
        flag to prevent the test case from being queued with the *actual* crashes. */
 
     not_a_real_crash = 1;
-
   }
 
   switch (fault) {
@@ -4145,6 +4166,38 @@ static void maybe_delete_out_dir(void) {
   fn = alloc_printf("%s/hangs", out_dir);
 
   /* Backup hangs, too. */
+
+  if (in_place_resume && rmdir(fn)) {
+
+    time_t cur_t = time(0);
+    struct tm* t = localtime(&cur_t);
+
+#ifndef SIMPLE_FILES
+
+    u8* nfn = alloc_printf("%s.%04u-%02u-%02u-%02u:%02u:%02u", fn,
+                           t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+                           t->tm_hour, t->tm_min, t->tm_sec);
+
+#else
+
+    u8* nfn = alloc_printf("%s_%04u%02u%02u%02u%02u%02u", fn,
+                           t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+                           t->tm_hour, t->tm_min, t->tm_sec);
+
+#endif /* ^!SIMPLE_FILES */
+
+    rename(fn, nfn); /* Ignore errors. */
+    ck_free(nfn);
+
+  }
+
+  if (delete_files(fn, CASE_PREFIX)) goto dir_cleanup_failed;
+  ck_free(fn);
+
+  fn = alloc_printf("%s/nnbits", out_dir);
+
+  /* In the interest of debugging we save all test cases that trigger 
+   * oracle interrupts but whose tracing reveals no new bits. */
 
   if (in_place_resume && rmdir(fn)) {
 
@@ -7529,6 +7582,13 @@ EXP_ST void setup_dirs_fds(void) {
     ck_free(tmp);
 
   }
+
+  /* Test cases triggering oracle interrupts but without
+   * new trace bits. */
+
+  tmp = alloc_printf("%s/nnbits", out_dir);
+  if (mkdir(tmp, 0700)) PFATAL("Unable to create '%s'", tmp);
+  ck_free(tmp);
 
   /* All recorded crashes. */
 

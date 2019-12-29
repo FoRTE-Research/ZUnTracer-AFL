@@ -3526,11 +3526,6 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     trace_queued++;
 
-    /* If we hit crash on tracing, we want it queued but also saved as a crash. */
-
-    if (!stop_soon && new_fault == FAULT_CRASH) 
-      goto keep_as_crash;
-
     /* If here, this means the crash is due to jump-mistargeting. Set the following
        flag to prevent the test case from being queued with the *actual* crashes. */
 

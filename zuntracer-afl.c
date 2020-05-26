@@ -118,7 +118,9 @@ EXP_ST u8 *target_path,               /* Path to target binary            */
           *tracer_path,               /* Path to tracer binary            */
           *in_bbmap,                  /* Path to user-specified bbmap     */
           *oracle_zipr_dir,           /* Oracle zipr directory            */
-          *tracer_zipr_dir;           /* Tracer zipr directory            */
+          *tracer_zipr_dir,           /* Tracer zipr directory            */
+          *input_oracle,              /* Pre-built oracle binary          */
+          *input_tracer;              /* Pre-built tracer binary          */
 
 /* -------------- AFL vars ---------------------------------------------- */
 
@@ -470,7 +472,8 @@ void setup_oracle(){
 
   /* If not user-supplied, let Zipr instrument the binary. */
 
-  if (oracle_zipr_dir == NULL){
+  //if (oracle_zipr_dir == NULL){
+  if (input_oracle == NULL){
     oracle_zipr_dir = alloc_printf("%s/.zipr.oracle", out_dir);
     char * zipr_args[] = {"zafl.sh", target_path, oracle_path, "-f", "-t", oracle_zipr_dir, NULL};
     execute(zipr_args, "zafl.sh", 1);
@@ -479,14 +482,15 @@ void setup_oracle(){
   /* Otherwise, copy it over from the user-supplied Zipr dir. */
 
   else{
-    char * tmp = alloc_printf("%s/c.out", oracle_zipr_dir);
-    copy_file(tmp, oracle_path, 0777);
-    ck_free(tmp);
+    //char * tmp = alloc_printf("%s/c.out", oracle_zipr_dir);
+    copy_file(input_oracle, oracle_path, 0777);
+    //ck_free(tmp);
   }
 
   /* Set up virgin oracle path - this is the unmodified oracle binary. */
 
-  virgin_path = alloc_printf("%s/c.out", oracle_zipr_dir);   
+  //virgin_path = alloc_printf("%s/c.out", oracle_zipr_dir); 
+  virgin_path = input_oracle;  
 
   return;
 }
@@ -498,7 +502,8 @@ void setup_tracer(){
 
   /* If not user-supplied, let Zipr instrument the binary. */
 
-  if (tracer_zipr_dir == NULL){
+  //if (tracer_zipr_dir == NULL){
+  if (input_tracer == NULL){
     tracer_zipr_dir = alloc_printf("%s/.zipr.tracer", out_dir);
     char * zipr_args[] = {"zafl.sh", target_path, tracer_path, "-u", "-t", tracer_zipr_dir, NULL};
     execute(zipr_args, "zafl.sh", 1);
@@ -507,9 +512,9 @@ void setup_tracer(){
   /* Otherwise, copy it over from the user-supplied Zipr dir. */
 
   else{
-    char * tmp = alloc_printf("%s/c.out", tracer_zipr_dir);
-    copy_file(tmp, tracer_path, 0777);
-    ck_free(tmp);
+    //char * tmp = alloc_printf("%s/c.out", tracer_zipr_dir);
+    copy_file(input_tracer, tracer_path, 0777);
+    //ck_free(tmp);
   }
 
   return;
@@ -7459,8 +7464,10 @@ static void usage(u8* argv0) {
 
        "If using pre-generated oracle/tracer binaries (optional but recommended):\n\n"
        
-       "  -O dir        - Zipr working dir for oracle (required)\n"
-       "  -T dir        - Zipr working dir for tracer (required)\n"
+       //"  -O dir        - Zipr working dir for oracle (required)\n"
+       //"  -T dir        - Zipr working dir for tracer (required)\n"
+       "  -O dir        - Path to oracle binary (required)\n"
+       "  -T dir        - Path to tracer binary (required)\n"
        "  -B file       - zuntracer-mapper.py output block map (optional)\n\n"
 
        "afl-eval parameters:\n\n" /* afl-eval */
@@ -8048,15 +8055,19 @@ int main(int argc, char** argv) {
 
       case 'O': /* Zipr oracle dir */
 
-        if (oracle_zipr_dir) FATAL("Multiple -O options not supported");
-        oracle_zipr_dir = optarg;
+        //if (oracle_zipr_dir) FATAL("Multiple -O options not supported");
+        //oracle_zipr_dir = optarg;
+        if (input_oracle) FATAL("Multiple -O options not supported");
+        input_oracle = optarg;
 
         break;
 
       case 'T': /* Zipr tracer dir */
 
-        if (tracer_zipr_dir) FATAL("Multiple -T options not supported");
-        tracer_zipr_dir = optarg;
+        //if (tracer_zipr_dir) FATAL("Multiple -T options not supported");
+        //tracer_zipr_dir = optarg;
+        if (input_tracer) FATAL("Multiple -T options not supported");
+        input_tracer = optarg;
 
         break;
 
@@ -8201,7 +8212,8 @@ int main(int argc, char** argv) {
         if (in_bbmap) 
           FATAL("Multiple -B options not supported");
         
-        if (!oracle_zipr_dir || !tracer_zipr_dir) 
+        //if (!oracle_zipr_dir || !tracer_zipr_dir)
+        if (!input_oracle || !input_tracer)
           FATAL("Using -B requires oracle (-O) and tracer (-T) Zipr dirs");
 
         in_bbmap = optarg;
@@ -8220,11 +8232,13 @@ int main(int argc, char** argv) {
 
     }
 
-  if ((oracle_zipr_dir && !tracer_zipr_dir) || (!oracle_zipr_dir && tracer_zipr_dir)) 
-    FATAL("If providing Zipr working dirs, BOTH oracle's and tracer's must be provided.");
+  //if ((oracle_zipr_dir && !tracer_zipr_dir) || (!oracle_zipr_dir && tracer_zipr_dir)) 
+  //  FATAL("If providing Zipr working dirs, BOTH oracle's and tracer's must be provided.");
 
-  if (!oracle_zipr_dir || !tracer_zipr_dir)
-    WARNF("No oracle/tracer Zipr dirs provided! Will run Zipr with block coverage-only config...");
+  //if (!oracle_zipr_dir || !tracer_zipr_dir)
+  //  WARNF("No oracle/tracer Zipr dirs provided! Will run Zipr with block coverage-only config...");
+  if (!input_oracle || !input_tracer)
+    WARNF("No oracle/tracer provided! Will generate with block coverage-only config...");
 
   if (optind == argc || !in_dir || !out_dir) usage(argv[0]);
 

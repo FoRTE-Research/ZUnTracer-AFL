@@ -2671,7 +2671,7 @@ static void show_stats(void);
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
-static u8 run_target(s32 * child_pid, s32 * fsrv_ctl_fd, s32 * fsrv_st_fd, u32 timeout) {
+static u8 run_target(s32 *fsrv_pid, char ** fsrv_argv, s32 *child_pid, s32 *fsrv_ctl_fd, s32 *fsrv_st_fd, u32 timeout) {
 
   /* afl-eval */ /* : If exceeded user-specified limit, write stats and terminate. */
 
@@ -2700,25 +2700,37 @@ static u8 run_target(s32 * child_pid, s32 * fsrv_ctl_fd, s32 * fsrv_st_fd, u32 t
   MEM_BARRIER();
 
   /* Forkserver is up, so tell it to have at it (control pipe), then read back PID. 
-   * A message length of 4 indicates successful communication with the forkserver. */
+   * A message length of 4 indicates successful communication with the forkserver. 
+   * Then, read status message and check message length. 
+   * 
+   * NEW 01/21: The following liveness checks utilize some degree of fault tolerance 
+   * (e.g., the fork server killed due to OOM) and will restart the fork server should 
+   * any of them fail. */
 
-  if (write(*fsrv_ctl_fd, &prev_timed_out, 4) != 4) {
+retry_liveness_check:
+
+  if ((write(*fsrv_ctl_fd, &prev_timed_out, 4) != 4) || (read(*fsrv_st_fd, child_pid, 4) != 4)) {
     if (stop_soon) return 0;
-    FATAL("Unable to request new process from fork server (OOM?)");
-  }
 
-  /* Read status message and check message length. */
+    WARNF("Unable to request new process from fork server (OOM?). Attempting restart...");
 
-  if (read(*fsrv_st_fd, child_pid, 4) != 4) {
-    if (stop_soon) return 0;
-    FATAL("Unable to request new process from fork server (OOM?)");
+    stop_forkserver(fsrv_pid, child_pid, fsrv_ctl_fd, fsrv_st_fd);
+    init_forkserver(fsrv_pid, fsrv_ctl_fd, fsrv_st_fd, fsrv_argv);
+    
+    goto retry_liveness_check;
   }
 
   /* Verify child PID isn't corrupt or active. */
 
   if (*child_pid <= 0) {
     if (stop_soon) return 0;
-    FATAL("Fork server is misbehaving (OOM?)");
+    
+    WARNF("Fork server appears to be misbehaving (OOM?). Attempting restart...");
+
+    stop_forkserver(fsrv_pid, child_pid, fsrv_ctl_fd, fsrv_st_fd);
+    init_forkserver(fsrv_pid, fsrv_ctl_fd, fsrv_st_fd, fsrv_argv);
+    
+    goto retry_liveness_check;
   }
 
   /* Configure timer. */
@@ -2731,7 +2743,13 @@ static u8 run_target(s32 * child_pid, s32 * fsrv_ctl_fd, s32 * fsrv_st_fd, u32 t
 
   if (read(*fsrv_st_fd, &status, 4) != 4) {
     if (stop_soon) return 0;
-    FATAL("Unable to communicate with fork server (OOM?)");
+    
+    WARNF("Unable to communicate with forkserver (OOM?). Attempting restart...");
+
+    stop_forkserver(fsrv_pid, child_pid, fsrv_ctl_fd, fsrv_st_fd);
+    init_forkserver(fsrv_pid, fsrv_ctl_fd, fsrv_st_fd, fsrv_argv);
+    
+    goto retry_liveness_check;
   }
 
   if (!WIFSTOPPED(status)) 
@@ -2889,7 +2907,7 @@ static u8 calibrate_case(struct queue_entry* q, u8* use_mem,
 
     write_to_testcase(use_mem, q->len);
 
-    fault = run_target(&tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, use_tmout);
+    fault = run_target(&tracer_fsrv_pid, tracer_argv, &tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, use_tmout);
     calib_execs++; /* afl-eval */
 
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
@@ -3445,7 +3463,7 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     /* If triggering oracle interrupt or crash, trace and store new signal. */ 
 
-    new_fault = run_target(&tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, exec_tmout);
+    new_fault = run_target(&tracer_fsrv_pid, tracer_argv, &tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, exec_tmout);
     trace_execs++;   
 
     if (!stop_soon){ 
@@ -4935,7 +4953,7 @@ static u8 trim_case(struct queue_entry* q, u8* in_buf) {
 
       write_with_gap(in_buf, q->len, remove_pos, trim_avail);
 
-      fault = run_target(&tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, exec_tmout);
+      fault = run_target(&tracer_fsrv_pid, tracer_argv, &tracer_child_pid, &tracer_fsrv_ctl_fd, &tracer_fsrv_st_fd, exec_tmout);
       trim_execs++; /* afl-eval */
 
       if (stop_soon || fault == FAULT_ERROR) goto abort_trimming;
@@ -5028,7 +5046,7 @@ EXP_ST u8 common_fuzz_stuff(u8* out_buf, u32 len) {
 
   write_to_testcase(out_buf, len);
 
-  fault = run_target(&oracle_child_pid, &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd, exec_tmout);
+  fault = run_target(&oracle_fsrv_pid, oracle_argv, &oracle_child_pid, &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd, exec_tmout);
 
   if (stop_soon) return 1;
 
@@ -7157,7 +7175,7 @@ static void sync_fuzzers() {
 
         write_to_testcase(mem, st.st_size);
 
-        fault = run_target(&oracle_child_pid, &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd, exec_tmout);
+        fault = run_target(&oracle_fsrv_pid, oracle_argv, &oracle_child_pid, &oracle_fsrv_ctl_fd, &oracle_fsrv_st_fd, exec_tmout);
         sync_execs++; /* afl-eval */
 
         if (stop_soon) return;

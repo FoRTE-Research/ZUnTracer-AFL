@@ -554,14 +554,14 @@ static void find_binary(u8* fname) {
 
 /* Fix up argv for QEMU. */
 
-static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
+static char** get_qemu_argv(u8* own_loc, char** argv, int argc, int qemu_mode) {
 
   char** new_argv = ck_alloc(sizeof(char*) * (argc + 4));
   u8 *tmp, *cp, *rsl, *own_copy;
 
   /* Workaround for a QEMU stability glitch. */
-
-  setenv("QEMU_LOG", "nochain", 1);
+  if (qemu_mode == 1)
+    setenv("QEMU_LOG", "nochain", 1);
 
   memcpy(new_argv + 3, argv + 1, sizeof(char*) * argc);
 
@@ -573,11 +573,13 @@ static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
   tmp = getenv("AFL_PATH");
 
   if (tmp) {
-
-    cp = alloc_printf("%s/afl-qemu-trace", tmp);
+    if (qemu_mode == 1)
+      cp = alloc_printf("%s/afl-qemu-trace", tmp);
+    else
+      cp = alloc_printf("%s/afl-qemuv2-trace", tmp);
 
     if (access(cp, X_OK))
-      FATAL("Unable to find '%s'", tmp);
+      FATAL("Unable to find '%s'", cp);
 
     target_path = new_argv[0] = cp;
     return new_argv;
@@ -591,7 +593,11 @@ static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
 
     *rsl = 0;
 
-    cp = alloc_printf("%s/afl-qemu-trace", own_copy);
+    if (qemu_mode == 1)
+      cp = alloc_printf("%s/afl-qemu-trace", own_copy);
+    else
+      cp = alloc_printf("%s/afl-qemuv2-trace", own_copy);
+
     ck_free(own_copy);
 
     if (!access(cp, X_OK)) {
@@ -603,14 +609,24 @@ static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
 
   } else ck_free(own_copy);
 
-  if (!access(BIN_PATH "/afl-qemu-trace", X_OK)) {
+  if (qemu_mode == 1){
+    if (!access(BIN_PATH "/afl-qemu-trace", X_OK)) {
 
-    target_path = new_argv[0] = BIN_PATH "/afl-qemu-trace";
-    return new_argv;
+      target_path = new_argv[0] = BIN_PATH "/afl-qemu-trace";
+      return new_argv;
 
+    }
+    FATAL("Unable to find 'afl-qemu-trace'.");
   }
+  else{
+    if (!access(BIN_PATH "/afl-qemuv2-trace", X_OK)) {
 
-  FATAL("Unable to find 'afl-qemu-trace'.");
+      target_path = new_argv[0] = BIN_PATH "/afl-qemuv2-trace";
+      return new_argv;
+
+    }
+    FATAL("Unable to find 'afl-qemuv2-trace'.");
+  }
 
 }
 
@@ -715,12 +731,13 @@ int main(int argc, char** argv) {
         at_file = optarg;
         break;
 
-      case 'Q':
+      case 'Q': /* QEMU mode; v1 (-Q), v2 (-QQ) */
 
-        if (qemu_mode) FATAL("Multiple -Q options not supported");
+        qemu_mode++;
+        if (qemu_mode > 2) FATAL("Maximum QEMU mode is 2");
+
         if (!mem_limit_given) mem_limit = MEM_LIMIT_QEMU;
 
-        qemu_mode = 1;
         break;
 
       case 'b':
@@ -760,7 +777,7 @@ int main(int argc, char** argv) {
   detect_file_args(argv + optind);
 
   if (qemu_mode)
-    use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
+    use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind, qemu_mode);
   else
     use_argv = argv + optind;
 
